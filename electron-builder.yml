@@ -1,5 +1,5 @@
 appId: io.github.debuneko233.zhuruacquisition
-productName: Zhuru Wave Acquisition
+productName: Wave Collector
 directories:
   buildResources: resources
   output: dist
@@ -14,7 +14,7 @@ extraResources:
 win:
   target:
     - nsis
-  artifactName: Zhuru-Wave-Acquisition-${version}-${arch}.${ext}
+  artifactName: WaveCollector-${version}-${arch}.${ext}
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

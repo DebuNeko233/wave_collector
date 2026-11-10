@@ -87,7 +87,7 @@ const createWindow = (): void => {
     minWidth: 1100,
     minHeight: 700,
     show: false,
-    title: 'Zhuru Wave Acquisition',
+    title: 'Wave Collector',
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(dirname, '../preload/index.mjs'),
