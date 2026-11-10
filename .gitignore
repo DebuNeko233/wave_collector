@@ -1,0 +1,13 @@
+node_modules/
+out/
+dist/
+native/build/
+resources/bin/*
+!resources/bin/.gitkeep
+vendor/hantek/*
+!vendor/hantek/README.md
+*.zwraw
+recordings/
+exports/
+*.log
+.DS_Store
