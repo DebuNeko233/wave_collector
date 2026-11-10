@@ -277,7 +277,7 @@ async function warnHantek() {
                 <div class="control-group"><label>保存位置</label><div class="input-with-button"><el-input v-model="form.output" :disabled="live" placeholder="选择文件夹"/><el-button :disabled="live" :icon="FolderOpened" aria-label="选择保存目录" @click="pickOutput"/></div></div>
                 <div class="control-grid"><div class="control-group"><label>分段时长 (s)</label><el-input-number v-model="form.segmentSeconds" :disabled="live" :min="1" :max="3600" controls-position="right"/></div><div class="control-group"><label>分段大小 (MB)</label><el-input-number v-model="form.segmentMb" :disabled="live" :min="1" :max="4096" controls-position="right"/></div></div>
                 <p v-if="form.source === 'hantek'" class="device-warning"><InfoFilled /> NORMAL 模式尚未验证无间断采集</p>
-                <p v-else-if="rateNote && !rateOptions.length && !rateLoading" class="device-warning"><InfoFilled /> {{ rateNote }}</p>
+                <p v-else-if="rateNote && !rateOptions.length" class="device-warning"><InfoFilled /> {{ rateNote }}</p>
                 <div class="action-row"><el-button v-if="!live" type="primary" size="large" :icon="VideoPlay" :disabled="!nativeAvailable || !bridgeReady || !rateOptions.length" @click="start">开始采集</el-button><el-button v-else type="danger" size="large" :icon="VideoPause" :loading="stopping" @click="stop">停止并保存</el-button></div>
               </section>
               <section class="panel channel-panel">
