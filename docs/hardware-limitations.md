@@ -25,3 +25,13 @@ ADC 数据取值 0～255，按厂商示例的 `（原始码值-128）×每格电
 原厂 HT6004BX SDK 的时基表（Table 1/2）采用 2 ns/div～1000 s/div，常规时基档位按每格 250 个采样点计算，2 ns～500 ns 依据启用通道数限制单/双/四通道最高采样率。新版本界面和 C++ 统一使用这张固定档位表，拔掉 USB 仍可选择预设采样率。选项不代表设备已连接，真正开始采集才会搜索、配置设备并回读采样率。1 MSa/s 不是说明书的离散档位；相邻档位为 1.25 MSa/s 和 500 kSa/s。
 
 源文件：`CircuitAnalysis/Hantek` 镜像中的 `6XXX USB Scope/HT6004BX_SDK/Manual/SDK_HTHardDLL-EN.pdf`，Table 1 和 Table 2；产品手册：<https://www.hantek.com/Product/Hantek6000BX/HT6004BX_Manual.pdf>。
+
+## 与厂商示例一致的 NORMAL 模式实现
+
+参考 [QTDSO/Hard.cpp](https://github.com/CircuitAnalysis/Hantek/blob/main/6XXX%20USB%20Scope/HT6004BX_SDK/Code%20Demo/QTDSO/Hard.cpp)
+及 [VCDSO/Hard.cpp](https://github.com/CircuitAnalysis/Hantek/blob/main/6XXX%20USB%20Scope/HT6004BX_SDK/Code%20Demo/VCDSO/Hard.cpp)：
+
+- 搜索候选设备索引 `dsoHTDeviceConnect`，依次初始化硬件、通道增益、采样率、继电器/触发、触发控制，设置通道偏移与触发电平；
+- 每批采样调用 `dsoHTStartCollectData(index, 1)`，查询 `dsoHTGetState` 的采集完成位，再用 `dsoHTGetData` 读四路对齐的 4K 样本，按 SDK 示例电压比例进行**名义电压**换算；
+- 厂商 VCDSO 示例对 `nTimeDIV > 23` 使用 SCAN 模式，其数据路径与 NORMAL 的 `dsoHTGetData` 不同。当前 UI **只提供索引 0–23 的 NORMAL 档位**，不会显示尚未实现的低速 SCAN 模式；
+- 不把相邻两次 4K 窗口伪称为物理连续；会话 `continuity` 仍为 `UNVERIFIED_vendor_normal_trigger_windows_may_have_gaps`。

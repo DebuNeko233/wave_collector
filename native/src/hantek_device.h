@@ -38,7 +38,9 @@ class HantekDevice final : public Device {
         }};
         static_assert(timebaseSeconds.size() == MAX_TIMEDIV_NUM);
         std::vector<std::pair<double, WORD>> out;
-        for (WORD index = 0; index < timebaseSeconds.size(); ++index) {
+        // VCDSO uses YT_SCAN above timebase index 23. This adapter implements
+        // NORMAL only; do not advertise scan rates that dsoHTGetData cannot capture.
+        for (WORD index = 0; index < 24; ++index) {
             double rate;
             if (index <= 6) rate = channelCount == 1 ? 1e9 : channelCount == 2 ? 5e8 : 2.5e8;
             else if (index == 7) rate = channelCount <= 2 ? 5e8 : 2.5e8;
@@ -64,8 +66,8 @@ public:
         });
         if (match == rates.end()) throw std::runtime_error("Unsupported sample rate for selected channels");
 
-        short deviceInfo[32]{};
-        check(dsoHTSearchDevice(deviceInfo), "dsoHTSearchDevice");
+        // Same device discovery flow as QTDSO::Hard::FindeDev:
+        // try each candidate port with dsoHTDeviceConnect.
         bool connected = false;
         for (WORD index = 0; index < 32; ++index) {
             if (dsoHTDeviceConnect(index)) { deviceIndex_ = index; connected = true; break; }
@@ -93,23 +95,24 @@ public:
             raw_[ch].resize(kReadLen);
         }
 
+        // Follow the vendor's QTDSO and VCDSO Hard::Init sequence.
         check(dsoInitHard(deviceIndex_), "dsoInitHard");
-        // Conservative 4-channel gain path; physical relay.enable honors mask.
         check(dsoHTADCCHModGain(deviceIndex_, 4), "dsoHTADCCHModGain");
-        check(dsoHTSetCHAndTrigger(deviceIndex_, &relay_, control_.nTimeDIV), "dsoHTSetCHAndTrigger");
-        check(dsoHTSetSampleRate(deviceIndex_, YT_NORMAL, &relay_, &control_), "dsoHTSetSampleRate");
-        WORD volts[4]{kVoltDiv,kVoltDiv,kVoltDiv,kVoltDiv};
-        WORD pos[4]{kVPos,kVPos,kVPos,kVPos};
-        check(dsoHTSetAmpCalibrate(deviceIndex_, control_.nCHSet, control_.nTimeDIV, volts, pos),
-              "dsoHTSetAmpCalibrate");
+        check(dsoHTSetSampleRate(deviceIndex_, YT_NORMAL, &relay_, &control_),
+              "dsoHTSetSampleRate");
+        check(dsoHTSetCHAndTrigger(deviceIndex_, &relay_, control_.nTimeDIV),
+              "dsoHTSetCHAndTrigger");
+        check(dsoHTSetRamAndTrigerControl(deviceIndex_, control_.nTimeDIV,
+                                          control_.nCHSet, control_.nTriggerSource, 0),
+              "dsoHTSetRamAndTrigerControl");
         for (int ch : selected_) {
-            check(dsoHTSetCHPos(deviceIndex_, kVoltDiv, kVPos, static_cast<WORD>(ch), 4),
-                  "dsoHTSetCHPos");
+            check(dsoHTSetCHPos(deviceIndex_, kVoltDiv, kVPos,
+                                 static_cast<WORD>(ch), 4), "dsoHTSetCHPos");
         }
-        check(dsoHTSetTrigerMode(deviceIndex_, EDGE, RISE, DC), "dsoHTSetTrigerMode");
-        check(dsoHTSetVTriggerLevel(deviceIndex_, kVPos, 20), "dsoHTSetVTriggerLevel");
-        check(dsoHTSetRamAndTrigerControl(deviceIndex_, control_.nTimeDIV, control_.nCHSet,
-                                          control_.nTriggerSource, 0), "dsoHTSetRamAndTrigerControl");
+        check(dsoHTSetVTriggerLevel(deviceIndex_, kVPos, 4),
+              "dsoHTSetVTriggerLevel");
+        check(dsoHTSetTrigerMode(deviceIndex_, EDGE, RISE, DC),
+              "dsoHTSetTrigerMode");
         sampleRateHz_ = static_cast<double>(dsoGetSampleRate(deviceIndex_));
         if (!(std::isfinite(sampleRateHz_) && sampleRateHz_ > 0))
             throw std::runtime_error("Vendor SDK did not report a valid applied sample rate");
@@ -122,7 +125,7 @@ public:
         // buffer. Restart and wait for each window rather than rereading stale memory.
         control_.nReadDataLen = static_cast<ULONG>(std::min<size_t>(maxFrames, kReadLen));
         control_.nBufferLen = kReadLen;
-        check(dsoHTStartCollectData(deviceIndex_, 0), "dsoHTStartCollectData");
+        check(dsoHTStartCollectData(deviceIndex_, 1), "dsoHTStartCollectData");
         const auto deadline = Clock::now() + std::chrono::seconds(8);
         bool completed = false;
         while (Clock::now() < deadline) {
@@ -138,11 +141,13 @@ public:
         if (n == 0 || n > kReadLen || n > maxFrames)
             throw std::runtime_error("HT6004BX returned an invalid capture length");
         dst.resize(n * selected_.size());
-        constexpr float voltsPerDivision = 0.5f; // kVoltDiv=7, nominal only.
+        // Vendor VCDSO::Hard::ReadData describes (ADC - lever) * 8 * V/div / 255.
+        // kVoltDiv=7 => 500 mV/div; this is nominal and not a calibrated reading.
+        constexpr float voltsPerDivision = 0.5f;
         for (size_t i = 0; i < n; ++i)
             for (size_t j = 0; j < selected_.size(); ++j)
                 dst[i * selected_.size() + j] =
-                    (static_cast<float>(raw_[selected_[j]][i]) - kVPos) * (voltsPerDivision / 32.0f);
+                    (static_cast<float>(raw_[selected_[j]][i]) - kVPos) * (8.0f * voltsPerDivision / 255.0f);
         return n;
     }
     std::string source() const override { return "hantek_sdk_direct_normal"; }

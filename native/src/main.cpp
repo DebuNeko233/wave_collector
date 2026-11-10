@@ -207,7 +207,7 @@ public:
 };
 static void preview(const Block& b, int mask, double rate) {
     auto channels = channelsFromMask(mask); constexpr size_t buckets = 180;
-    std::ostringstream o; o << "{\"type\":\"preview\",\"start_index\":" << b.start << ",\"rate\":" << rate << ",\"data\":[";
+    std::ostringstream o; o << "{\"type\":\"preview\",\"start_index\":" << b.start << ",\"frames\":" << b.frames << ",\"rate\":" << rate << ",\"data\":[";
     for (size_t j = 0; j < channels.size(); ++j) {
         if (j) o << ',';
         o << '[';

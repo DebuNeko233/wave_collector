@@ -1,170 +1,255 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Connection, FolderOpened, VideoPlay, VideoPause, Download, Scissor, InfoFilled, DataLine } from '@element-plus/icons-vue'
+import {
+  Monitor, Scissor, DataLine, FolderOpened, VideoPlay, VideoPause,
+  Download, ArrowDown, ArrowUp, InfoFilled
+} from '@element-plus/icons-vue'
 import type { AcqEvent, RecordingConfig, ExportConfig } from '../../preload/index'
 import { supportedSampleRates, preferredSampleRate } from './sampleRates'
 
-type Channel = { id: number, enabled: boolean, name: string, color: string }
+type Channel = { id: number; enabled: boolean; name: string; color: string }
+type LogLevel = 'info' | 'warn' | 'error'
+
 const channels = reactive<Channel[]>([
-  { id: 0, enabled: true, name: 'X1', color: '#4b9ee9' },
-  { id: 1, enabled: true, name: 'Y1', color: '#a184f5' },
-  { id: 2, enabled: false, name: 'X2', color: '#4ec9a7' },
-  { id: 3, enabled: false, name: 'Y2', color: '#e9ae63' }
+  { id: 0, enabled: true, name: 'X1', color: '#48c6e8' },
+  { id: 1, enabled: true, name: 'Y1', color: '#f1b85d' },
+  { id: 2, enabled: false, name: 'X2', color: '#a58af7' },
+  { id: 3, enabled: false, name: 'Y2', color: '#6add9a' }
 ])
 const form = reactive<RecordingConfig>({
-  source: 'mock', output: '', mask: 3, rate: 1000000,
+  source: 'mock', output: '', mask: 3, rate: 1_000_000,
   segmentSeconds: 60, segmentMb: 128, unit: 'mV', names: channels.map(c => c.name)
 })
 const splitter = reactive<ExportConfig>({
-  input: '', output: '', mask: 3, start: 0, count: 0,
-  pointsPerFile: 100000, unit: 'mV'
+  input: '', output: '', mask: 3, start: 0, count: 0, pointsPerFile: 100000, unit: 'mV'
 })
-const tab = ref('capture')
+
+const page = ref<'capture' | 'splitter'>('capture')
+const scopeMode = ref<'overlay' | 'stack'>('overlay')
+const showLog = ref(false)
+const bridgeReady = ref(false)
+const nativeAvailable = ref(false)
 const live = ref(false)
 const stopping = ref(false)
 const exporting = ref(false)
-const nativeAvailable = ref(true)
 const actualRate = ref(0)
 const captured = ref(0)
 const written = ref(0)
-const backlog = ref(0)
-const sessionPath = ref('')
+const pending = ref(0)
+const elapsed = ref(0)
 const continuity = ref('')
-const history = ref<{ time: string, message: string, level: 'info' | 'error' | 'warn' }[]>([])
-const selected = computed(() => channels.filter(c => c.enabled))
-const selectedMask = computed(() => channels.reduce((mask, c) => mask | (c.enabled ? (1 << c.id) : 0), 0))
-const rateOptions = ref<{ label: string, value: number }[]>([])
-const rateNote = ref('等待查询设备支持的采样率')
+const sessionPath = ref('')
+const errorText = ref('')
+const history = ref<{ at: string; message: string; level: LogLevel }[]>([])
 const exportSelections = ref<number[]>([0, 1])
-const rateLabel = (r: number) => r >= 1000000
-  ? `${Number((r / 1000000).toFixed(3))} MSa/s`
-  : r >= 1000 ? `${Number((r / 1000).toFixed(3))} kSa/s` : `${r} Sa/s`
-function refreshRates() {
-  const mask = selectedMask.value
-  const rates = supportedSampleRates(form.source, mask)
-  rateOptions.value = rates.map(value => ({ label: rateLabel(value), value }))
-  if (rates.length && !rates.includes(form.rate)) form.rate = preferredSampleRate(rates)
-  rateNote.value = mask === 0 ? '请至少启用一个通道' : rates.length
-    ? '按 HT6004BX SDK 说明书时基表选择；实际采样率以设备回读为准'
-    : '未找到有效采样率'
-}
-watch([() => form.source, selectedMask], () => { if (!live.value) refreshRates() })
 
-const displayedRate = computed(() => {
-  const r = actualRate.value || form.rate
-  if (r >= 1000000) return (r / 1000000).toFixed(2) + ' MSa/s'
-  return (r / 1000).toFixed(r % 1000 ? 2 : 0) + ' kSa/s'
-})
-const formatInt = (n: number) => Math.floor(n).toLocaleString('zh-CN')
-function log(message: string, level: 'info' | 'error' | 'warn' = 'info') {
-  history.value.unshift({ time: new Date().toLocaleTimeString('zh-CN', { hour12: false }), message, level })
-  history.value = history.value.slice(0, 80)
-}
-const canvasRefs = new Map<number, HTMLCanvasElement>()
-const previewCache = ref<[number, number][][]>([])
-let previewChannels: number[] = [0, 1]
+const selected = computed(() => channels.filter(ch => ch.enabled))
+const selectedMask = computed(() => channels.reduce((v, ch) => v | (ch.enabled ? 1 << ch.id : 0), 0))
+const rates = computed(() => supportedSampleRates(form.source, selectedMask.value))
+const rateOptions = computed(() => rates.value.map(rate => ({ value: rate, label: formatRate(rate) })))
+const displayRate = computed(() => formatRate(actualRate.value || form.rate))
+const statusText = computed(() => stopping.value ? '正在保存' : live.value ? '采集中' : '就绪')
+const statusTone = computed(() => stopping.value ? 'busy' : live.value ? 'active' : 'idle')
+const previewFrameCount = ref(0)
+const previewStart = ref(0)
+const preview = ref<[number, number][][]>([])
+let previewChannels: number[] = []
+let unsubscribe: (() => void) | undefined
+let resizeObserver: ResizeObserver | undefined
 let framePending = false
-function updateCanvasRef(index: number, el: unknown) {
-  if (el instanceof HTMLCanvasElement) canvasRefs.set(index, el)
-  else canvasRefs.delete(index)
+const scopeCanvas = ref<HTMLCanvasElement | null>(null)
+const scopeViewport = ref<HTMLDivElement | null>(null)
+
+function formatRate(rate: number): string {
+  if (rate >= 1e9) return `${Number((rate / 1e9).toFixed(3))} GSa/s`
+  if (rate >= 1e6) return `${Number((rate / 1e6).toFixed(3))} MSa/s`
+  if (rate >= 1e3) return `${Number((rate / 1e3).toFixed(3))} kSa/s`
+  return `${Number(rate.toFixed(2))} Sa/s`
 }
-function drawPreview() {
-  framePending = false
-  for (let j = 0; j < previewChannels.length; ++j) {
-    const id = previewChannels[j]
-    const canvas = canvasRefs.get(id)
-    const data = previewCache.value[j]
-    if (!canvas || !data?.length) continue
-    const width = Math.max(100, canvas.clientWidth)
-    const height = Math.max(100, canvas.clientHeight)
-    const ratio = window.devicePixelRatio || 1
-    canvas.width = Math.round(width * ratio)
-    canvas.height = Math.round(height * ratio)
-    const ctx = canvas.getContext('2d')
-    if (!ctx) continue
-    ctx.scale(ratio, ratio)
-    ctx.fillStyle = '#101c2b'; ctx.fillRect(0, 0, width, height)
-    const gridLeft = 38, gridRight = 12, gridTop = 10, gridBottom = 22
-    const chartW = width - gridLeft - gridRight, chartH = height - gridTop - gridBottom
-    ctx.strokeStyle = '#2a3b4d'; ctx.lineWidth = 1
-    for (let k=0;k<=8;k++) { const x=gridLeft + chartW*k/8; ctx.beginPath();ctx.moveTo(x,gridTop);ctx.lineTo(x,gridTop+chartH);ctx.stroke() }
-    for (let k=0;k<=4;k++) { const y=gridTop+chartH*k/4;ctx.beginPath();ctx.moveTo(gridLeft,y);ctx.lineTo(gridLeft+chartW,y);ctx.stroke() }
-    const mult = form.unit === 'mV' ? 1000 : 1
-    const values = data.flatMap(([lo, hi]) => [lo*mult,hi*mult])
-    const ymin = Math.min(...values), ymax = Math.max(...values)
-    const center = (ymin+ymax)/2
-    const span = Math.max((ymax-ymin)*1.15,.001)
-    const y = (v: number) => gridTop+chartH/2-(v-center)*chartH/span
-    ctx.strokeStyle = channels[id].color;ctx.lineWidth = 1.35
-    ctx.beginPath()
-    for (let k=0;k<data.length;k++) {
-      const x=gridLeft+chartW*k/Math.max(1,data.length-1)
-      ctx.moveTo(x,y(data[k][0]*mult)); ctx.lineTo(x,y(data[k][1]*mult))
-    }
-    ctx.stroke()
-    ctx.font='11px ui-monospace, SFMono-Regular, Consolas, monospace'
-    ctx.fillStyle='#8498af'
-    ctx.fillText(`${(center + span/2).toFixed(1)} ${form.unit}`, 4, 19)
-    ctx.fillText(`${(center - span/2).toFixed(1)}`, 4, height-15)
-  }
+function formatCount(n: number): string { return Math.max(0, n).toLocaleString('zh-CN') }
+function formatSeconds(n: number): string {
+  const s = Math.max(0, Math.floor(n))
+  return `${String(Math.floor(s / 3600)).padStart(2, '0')}:${String(Math.floor(s % 3600 / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+}
+function formatDuration(s: number): string {
+  if (s >= 1) return `${Number(s.toFixed(2))} s`
+  if (s >= 0.001) return `${Number((s * 1000).toFixed(2))} ms`
+  return `${Number((s * 1e6).toFixed(2))} μs`
+}
+function log(message: string, level: LogLevel = 'info') {
+  history.value.unshift({ at: new Date().toLocaleTimeString('zh-CN', { hour12: false }), message, level })
+  history.value = history.value.slice(0, 100)
+  if (level === 'error') errorText.value = message
 }
 function scheduleDraw() {
-  if (!framePending) { framePending = true; requestAnimationFrame(drawPreview) }
+  if (framePending) return
+  framePending = true
+  requestAnimationFrame(drawScope)
 }
-function handleEvent(event: AcqEvent) {
+function drawScope() {
+  framePending = false
+  const canvas = scopeCanvas.value
+  if (!canvas) return
+  const bounds = canvas.getBoundingClientRect()
+  const width = Math.max(160, bounds.width)
+  const height = Math.max(160, bounds.height)
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1))
+  canvas.width = Math.round(width * dpr)
+  canvas.height = Math.round(height * dpr)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.fillStyle = '#0a101a'
+  ctx.fillRect(0, 0, width, height)
+  const left = 22, right = width - 23, top = 22, bottom = height - 29
+  const gridWidth = right - left, gridHeight = bottom - top
+  ctx.lineWidth = 1
+  for (let x = 0; x <= 10; x++) {
+    const px = left + x * gridWidth / 10
+    ctx.strokeStyle = x === 5 ? 'rgba(108,139,170,.23)' : 'rgba(91,123,149,.115)'
+    ctx.beginPath(); ctx.moveTo(px + .5, top); ctx.lineTo(px + .5, bottom); ctx.stroke()
+  }
+  for (let y = 0; y <= 8; y++) {
+    const py = top + y * gridHeight / 8
+    ctx.strokeStyle = y === 4 ? 'rgba(108,139,170,.23)' : 'rgba(91,123,149,.115)'
+    ctx.beginPath(); ctx.moveTo(left, py + .5); ctx.lineTo(right, py + .5); ctx.stroke()
+  }
+  ctx.fillStyle = '#60748b'
+  ctx.font = '11px Consolas, Menlo, monospace'
+  ctx.fillText('0', left, height - 10)
+  const windowSeconds = previewFrameCount.value / (actualRate.value || form.rate || 1)
+  ctx.textAlign = 'right'
+  ctx.fillText(previewFrameCount.value ? formatDuration(windowSeconds) : 'TIME', right, height - 10)
+  ctx.textAlign = 'left'
+  if (!preview.value.length || !previewFrameCount.value) {
+    ctx.fillStyle = '#5d7289'
+    ctx.textAlign = 'center'
+    ctx.font = '13px "Microsoft YaHei UI", system-ui, sans-serif'
+    ctx.fillText('等待采样数据', width / 2, height / 2)
+    ctx.textAlign = 'left'
+    return
+  }
+  const available = previewChannels.map((id, index) => ({ id, data: preview.value[index] })).filter(x => x.data?.length)
+  const multiplier = form.unit === 'mV' ? 1000 : 1
+  let globalMaximum = 0
+  if (scopeMode.value === 'overlay') for (const line of available) {
+    for (const [minimum, maximum] of line.data) globalMaximum = Math.max(globalMaximum, Math.abs(minimum), Math.abs(maximum))
+  }
+  globalMaximum = Math.max(globalMaximum, 0.0005)
+  available.forEach(({ id, data }, lane) => {
+    const laneCount = scopeMode.value === 'stack' ? available.length : 1
+    const laneHeight = gridHeight / laneCount
+    const laneTop = top + (scopeMode.value === 'stack' ? lane * laneHeight : 0)
+    const center = laneTop + laneHeight / 2
+    let peak = globalMaximum
+    if (scopeMode.value === 'stack') {
+      peak = data.reduce((n, [lo, hi]) => Math.max(n, Math.abs(lo), Math.abs(hi)), 0)
+      peak = Math.max(peak, .0005)
+    }
+    const scale = laneHeight * .43 / (peak * 1.12)
+    const pointY = (value: number) => center - value * scale
+    const color = channels[id].color
+    ctx.save()
+    ctx.beginPath(); ctx.rect(left, laneTop, gridWidth, laneHeight); ctx.clip()
+    ctx.strokeStyle = color
+    ctx.globalAlpha = .88
+    ctx.lineWidth = 1.2
+    ctx.beginPath()
+    data.forEach(([lo, hi], index) => {
+      const px = left + (index + .5) / data.length * gridWidth
+      ctx.moveTo(px, pointY(lo)); ctx.lineTo(px, pointY(hi))
+    })
+    ctx.stroke()
+    ctx.globalAlpha = .45
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    data.forEach(([lo, hi], index) => {
+      const px = left + (index + .5) / data.length * gridWidth
+      const y = pointY((lo + hi) / 2)
+      if (index === 0) ctx.moveTo(px, y)
+      else ctx.lineTo(px, y)
+    })
+    ctx.stroke()
+    ctx.restore()
+    if (scopeMode.value === 'stack') {
+      ctx.fillStyle = color; ctx.font = '11px Consolas, Menlo, monospace'
+      ctx.fillText(channels[id].name, left + 10, laneTop + 18)
+      ctx.fillStyle = '#73849a';ctx.textAlign = 'right'
+      ctx.fillText(`±${Number((peak * multiplier).toFixed(2))} ${form.unit}`, right - 8, laneTop + 18)
+      ctx.textAlign = 'left'
+      if (lane > 0) {
+        ctx.strokeStyle = '#25364a';ctx.beginPath();ctx.moveTo(left, laneTop);ctx.lineTo(right, laneTop);ctx.stroke()
+      }
+    }
+  })
+  ctx.fillStyle = '#65798e';ctx.textAlign = 'right'
+  ctx.fillText(`${formatCount(previewStart.value)} #`, right - 5, top + 14)
+  ctx.textAlign = 'left'
+}
+function handleEvent(event: AcqEvent & { start_index?: number }) {
   switch (event.type) {
+    case 'connecting': log('连接采集设备'); break
     case 'started':
-      live.value = true; stopping.value = false
+      live.value = true; stopping.value = false; errorText.value = ''
       sessionPath.value = event.folder || ''
       actualRate.value = event.rate || 0
       continuity.value = event.continuity || ''
-      log(`采集已开始：${sessionPath.value}`)
-      if (continuity.value.includes('UNVERIFIED')) log('厂商 SDK 触发窗口之间的连续性未经验证', 'warn')
+      log(`采集开始 · ${sessionPath.value}`)
+      if (continuity.value.includes('UNVERIFIED')) log('硬件触发窗口间的连续性未经验证', 'warn')
       break
     case 'stats':
       captured.value = event.captured || 0
       written.value = event.written || 0
-      backlog.value = event.pending_blocks || 0
+      pending.value = event.pending_blocks || 0
+      elapsed.value = event.elapsed_s || 0
       break
     case 'preview':
-      previewCache.value = event.data || []
+      preview.value = event.data || []
+      previewStart.value = event.start_index || 0
+      previewFrameCount.value = event.frames || 0
       scheduleDraw()
       break
     case 'stopped':
-      captured.value = event.captured || 0;written.value = event.written || 0
-      log(`完成写盘：${formatInt(written.value)} 帧`)
-      live.value = false;stopping.value = false
+      captured.value = event.captured || 0; written.value = event.written || 0
+      live.value = false; stopping.value = false
+      log(`写入完成 · ${formatCount(written.value)} 帧`)
       break
     case 'process_exit':
-      live.value = false;stopping.value = false
-      if (event.code !== 0) log(`采集进程异常结束（退出码 ${event.code}）`,'error')
+      live.value = false; stopping.value = false
+      if (event.code !== 0) log(`采集进程异常结束，代码 ${event.code}`, 'error')
       break
     case 'error':
-      log(event.message || '未知错误','error'); ElMessage.error(event.message || '采集失败')
+      log(event.message || '采集错误', 'error')
+      ElMessage.error(event.message || '采集错误')
       break
-    case 'export_done': log(`导出完成：${event.files} 个 CSV，共 ${formatInt(event.frames || 0)} 帧`); break
-    case 'log': log(event.message || '原生进程消息','warn');break
+    case 'export_done': log(`导出 ${event.files ?? 0} 份 CSV · ${formatCount(event.frames || 0)} 帧`); break
+    case 'log': log(event.message || '系统消息', 'warn'); break
   }
 }
-const bridgeReady = ref(false)
-let unsubscribe: (() => void) | undefined
+watch([rates, selectedMask], () => {
+  if (!live.value && rates.value.length && !rates.value.includes(form.rate)) form.rate = preferredSampleRate(rates.value)
+}, { immediate: true })
+watch([scopeMode, () => form.unit, selectedMask], scheduleDraw)
+
 onMounted(async () => {
-  // Show manual-based rates even when preload/driver/device is unavailable.
-  refreshRates()
-  const saved = localStorage.getItem('zhuru-acq-ui-settings')
+  const saved = localStorage.getItem('wave-collector-ui')
   if (saved) {
     try {
-      const obj = JSON.parse(saved)
-      if (obj.names?.length === 4) for (let i = 0; i < 4; i++) channels[i].name = String(obj.names[i]).slice(0, 60)
-      if (obj.output) form.output = obj.output
+      const values = JSON.parse(saved)
+      if (Array.isArray(values.names) && values.names.length === 4) channels.forEach((c, i) => c.name = String(values.names[i]).slice(0, 60))
+      if (typeof values.output === 'string') form.output = values.output
     } catch { /* ignore invalid saved settings */ }
   }
   window.addEventListener('resize', scheduleDraw)
+  if (scopeViewport.value) {
+    resizeObserver = new ResizeObserver(scheduleDraw)
+    resizeObserver.observe(scopeViewport.value)
+  }
+  scheduleDraw()
   const api = window.acquisition
   if (!api || typeof api.status !== 'function' || typeof api.onEvent !== 'function') {
-    nativeAvailable.value = false
-    log('Electron preload 未加载。请重新构建并从 Electron 启动应用。', 'error')
+    log('Electron 预加载桥接不可用；请启动桌面程序而非直接打开网页', 'error')
     return
   }
   bridgeReady.value = true
@@ -174,136 +259,221 @@ onMounted(async () => {
     nativeAvailable.value = status.available
     if (!form.output) form.output = status.defaultOutput
     splitter.output = form.output
-  } catch (e) {
-    nativeAvailable.value = false
-    log(String(e), 'error')
-  }
+  } catch (e) { log(String(e), 'error') }
+})
+onBeforeUnmount(() => {
+  unsubscribe?.()
+  resizeObserver?.disconnect()
+  window.removeEventListener('resize', scheduleDraw)
 })
 
-onBeforeUnmount(() => { unsubscribe?.();window.removeEventListener('resize',scheduleDraw) })
-async function pickOutput() { if (!bridgeReady.value) return ElMessage.error('Electron 桥接不可用'); const p=await window.acquisition.chooseDirectory();if(p)form.output=p }
-async function pickSplitterInput() { if (!bridgeReady.value) return ElMessage.error('Electron 桥接不可用'); const p=await window.acquisition.chooseInput();if(p)splitter.input=p }
-async function pickSplitterOutput() { if (!bridgeReady.value) return ElMessage.error('Electron 桥接不可用'); const p=await window.acquisition.chooseDirectory();if(p)splitter.output=p }
-async function start() {
-  if (!bridgeReady.value) return ElMessage.error('Electron 桥接不可用')
-  const mask = selectedMask.value
-  if (!mask) return ElMessage.warning('至少选择一个采集通道')
-  if (!form.output) return ElMessage.warning('请选择保存路径')
-  if (!rateOptions.value.some(item => item.value === form.rate)) return ElMessage.warning('请先选择设备支持的采样率档位')
-  if (channels.some(c => !c.name.trim() || c.name.includes('|'))) return ElMessage.warning('通道名称不能为空且不能包含 |')
-  form.mask = mask; form.names = channels.map(c => c.name)
+async function pickFolder(target: 'record' | 'export') {
+  if (!bridgeReady.value) return ElMessage.error('桌面桥接不可用')
+  const path = await window.acquisition.chooseDirectory()
+  if (path) {
+    if (target === 'record') form.output = path
+    else splitter.output = path
+  }
+}
+async function pickInput() {
+  if (!bridgeReady.value) return ElMessage.error('桌面桥接不可用')
+  const path = await window.acquisition.chooseInput()
+  if (path) splitter.input = path
+}
+async function beginRecord() {
+  if (!bridgeReady.value || !nativeAvailable.value) return ElMessage.error('原生采集程序不可用')
+  if (!selectedMask.value) return ElMessage.warning('请开启至少一个通道')
+  if (!form.output) return ElMessage.warning('请选择记录目录')
+  if (!rates.value.includes(form.rate)) return ElMessage.warning('请选择有效采样率')
+  if (channels.some(c => !c.name.trim() || c.name.includes('|'))) return ElMessage.warning('通道名不能为空且不能包含 |')
+  form.mask = selectedMask.value
+  form.names = channels.map(c => c.name.trim())
   previewChannels = selected.value.map(c => c.id)
-  previewCache.value = []
+  preview.value = []; previewFrameCount.value = 0
+  captured.value = 0; written.value = 0; pending.value = 0; elapsed.value = 0
+  actualRate.value = 0; errorText.value = ''
   await nextTick()
-  captured.value = 0; written.value = 0; backlog.value = 0; actualRate.value = 0
+  scheduleDraw()
   try {
-    localStorage.setItem('zhuru-acq-ui-settings', JSON.stringify({ names: form.names, output: form.output }))
+    localStorage.setItem('wave-collector-ui', JSON.stringify({ names: form.names, output: form.output }))
     await window.acquisition.record({ ...form, names: [...form.names] })
-    live.value = true;log('已发送开始采集命令，正在初始化设备…')
-  } catch (e) { log(String(e),'error');ElMessage.error(String(e)) }
+    live.value = true
+  } catch (e) { log(String(e), 'error'); ElMessage.error(String(e)) }
 }
-async function stop() {
-  if (!bridgeReady.value) return ElMessage.error('Electron 桥接不可用')
-  if (!live.value || stopping.value) return
+async function stopRecord() {
+  if (!bridgeReady.value || !live.value || stopping.value) return
   stopping.value = true
-  try { await window.acquisition.stop();log('已请求停止，原生进程正在冲刷缓冲数据…') }
-  catch (e) { stopping.value=false;ElMessage.error(String(e)) }
+  try { await window.acquisition.stop(); log('等待剩余数据写盘') }
+  catch (e) { stopping.value = false; log(String(e), 'error'); ElMessage.error(String(e)) }
 }
-async function exportData() {
-  if (!bridgeReady.value) return ElMessage.error('Electron 桥接不可用')
-  if (!splitter.input || !splitter.output) return ElMessage.warning('请选择输入记录和导出目录')
-  splitter.mask = exportSelections.value.reduce((mask, id) => mask | (1 << id), 0)
-  if (!splitter.mask) return ElMessage.warning('请选择输出通道')
+async function exportCsv() {
+  if (!bridgeReady.value) return ElMessage.error('桌面桥接不可用')
+  if (!splitter.input || !splitter.output) return ElMessage.warning('请设置输入记录和导出目录')
+  const mask = exportSelections.value.reduce((m, id) => m | (1 << id), 0)
+  if (!mask) return ElMessage.warning('请选择导出通道')
   exporting.value = true
   try {
-    const answer = await window.acquisition.exportCsv({ ...splitter })
-    ElMessage.success(`已导出 ${answer.files || 0} 个 CSV 文件`)
-  } catch(e) { log(String(e),'error');ElMessage.error(String(e)) }
-  finally { exporting.value=false }
+    const result = await window.acquisition.exportCsv({ ...splitter, mask })
+    ElMessage.success(`导出完成 · ${result.files || 0} 份 CSV`)
+  } catch (e) { log(String(e), 'error'); ElMessage.error(String(e)) }
+  finally { exporting.value = false }
 }
-async function warnHantek() {
+async function changeSource() {
   if (form.source !== 'hantek') return
-  await ElMessageBox.alert('HT6004BX 的 NORMAL 模式每次读取的是一个硬件触发窗口，跨窗口是否无间断、无重复和无丢点尚未验证。请通过实机标定。','厂商 SDK 采集提示', { type: 'warning' })
+  await ElMessageBox.alert('原厂示例使用触发窗口采集，暂未证明窗口之间无丢点、无重复。采样率为手册标称档位，实际以设备回读为准。',
+    'HT6004BX', { type: 'warning', confirmButtonText: '知道了' })
 }
 </script>
 
 <template>
-  <div class="app-shell">
-    <aside class="side-bar">
-      <div class="brand"><span class="brand-mark"><DataLine :size="23" /></span><strong>WAVE <span>COLLECTOR</span></strong></div>
-      <nav class="side-navigation" aria-label="主导航">
-        <button class="nav-link" :class="{ active: tab === 'capture' }" @click="tab = 'capture'"><Connection :size="18" /> 连续采集</button>
-        <button class="nav-link" :class="{ active: tab === 'splitter' }" @click="tab = 'splitter'"><Scissor :size="18" /> 记录分割器</button>
-      </nav>
-      <div class="sidebar-spacer"></div>
-      <div class="side-footer">v0.1.0</div>
+  <div class="application">
+    <aside class="rail">
+      <div class="brand-symbol" aria-label="Wave Collector"><DataLine :size="24" /></div>
+      <div class="rail-navigation">
+        <button class="rail-link" :class="{ selected: page === 'capture' }" title="采集" aria-label="采集" @click="page = 'capture'">
+          <Monitor :size="21" />
+        </button>
+        <button class="rail-link" :class="{ selected: page === 'splitter' }" title="分割器" aria-label="分割器" @click="page = 'splitter'">
+          <Scissor :size="21" />
+        </button>
+      </div>
+      <div class="rail-bottom">WC</div>
     </aside>
-    <div class="main-content">
-      <header class="top-bar">
-        <h1>{{ tab === 'capture' ? '连续采集' : '记录分割器' }}</h1>
-        <div class="top-right">
-          <span v-if="tab === 'capture'" class="top-rate" :title="actualRate ? '设备实际采样率' : '预设采样率，尚未由设备确认'">{{ displayedRate }}</span>
-          <span class="status"><i class="status-dot" :class="{ working: live }"></i>{{ live ? (stopping ? '正在停止' : '采集中') : '空闲' }}</span>
+
+    <div class="app-content">
+      <header class="app-topbar">
+        <div class="app-heading">
+          <h1>{{ page === 'capture' ? '波形采集' : '记录分割' }}</h1>
+          <span class="header-divider"></span>
+          <span class="hardware-name">{{ form.source === 'hantek' ? 'HT6004BX' : '模拟设备' }}</span>
+        </div>
+        <div class="topbar-actions">
+          <span v-if="page === 'capture'" class="header-rate">{{ displayRate }}</span>
+          <span class="capture-state" :class="statusTone"><i></i>{{ page === 'capture' ? statusText : '离线处理' }}</span>
         </div>
       </header>
-      <main class="page-scroll">
-        <template v-if="tab === 'capture'">
-          <div v-if="!bridgeReady" class="warning-banner">Electron 桥接不可用，请重启桌面应用。</div><div v-else-if="!nativeAvailable" class="warning-banner">缺少采集程序 zw_acq。请运行 <code>pnpm build:native</code>。</div>
-          <div class="stats-grid">
-            <div class="stat"><span>已采集</span><strong>{{ formatInt(captured) }}</strong></div>
-            <div class="stat"><span>已写入</span><strong>{{ formatInt(written) }}</strong></div>
-            <div class="stat"><span>待写缓冲</span><strong>{{ backlog }} <em>/ 128</em></strong></div>
+
+      <div v-if="page === 'capture'" class="capture-layout">
+        <div class="capture-main">
+          <div v-if="errorText" class="inline-alert">{{ errorText }} <button aria-label="关闭错误" @click="errorText = ''">×</button></div>
+          <div v-if="!bridgeReady || !nativeAvailable" class="inline-alert subtle">
+            {{ !bridgeReady ? 'Electron 桥接未加载；请使用桌面程序启动' : '未找到 zw_acq，请先运行 pnpm build:native' }}
           </div>
-          <div class="workspace-grid">
-            <section class="panel chart-panel">
-              <div class="panel-title"><h2>实时波形</h2></div>
-              <div class="wave-list">
-                <div v-for="channel of selected" :key="channel.id" class="wave-card">
-                  <div class="wave-label"><span class="wave-indicator" :style="{ backgroundColor: channel.color }"></span><b>{{ channel.name }}</b><small>CH{{ channel.id + 1 }}</small><span>{{ form.unit }}</span></div>
-                  <canvas :ref="el => updateCanvasRef(channel.id, el)" class="wave-canvas"></canvas>
+          <section class="scope-surface">
+            <div class="scope-toolbar">
+              <div class="scope-label"><span class="live-indicator" :class="{ running: live }"></span>示波视图</div>
+              <div class="scope-toolbar-end">
+                <div class="trace-legend">
+                  <span v-for="ch in selected" :key="ch.id" class="trace-key"><i :style="{ background: ch.color }"></i>{{ ch.name }}</span>
                 </div>
-                <div v-if="selected.length === 0" class="empty-chart">选择采集通道以预览波形</div>
+                <el-segmented v-model="scopeMode" class="scope-mode" :options="[{ label: '叠加', value: 'overlay' }, { label: '分轨', value: 'stack' }]" size="small" />
               </div>
-              <p v-if="continuity.includes('UNVERIFIED')" class="safety-note"><InfoFilled :size="15"/> 旧 DLL 的跨窗口连续性尚未验证</p>
-            </section>
-            <div class="controls-column">
-              <section class="panel configuration">
-                <div class="panel-title"><h2>采集设置</h2></div>
-                <div class="control-group"><label>设备</label><el-select v-model="form.source" :disabled="live" @change="warnHantek"><el-option label="模拟设备" value="mock"/><el-option label="HT6004BX（厂商 SDK）" value="hantek"/></el-select></div>
-                <div class="control-grid">
-                  <div class="control-group"><label>采样率</label><el-select v-model="form.rate" :disabled="live || !rateOptions.length" placeholder="查询设备档位"><el-option v-for="option in rateOptions" :key="option.value" :label="option.label" :value="option.value"/></el-select></div>
-                  <div class="control-group"><label>单位</label><el-segmented v-model="form.unit" :options="['V', 'mV']" :disabled="live" block/></div>
-                </div>
-                <div class="control-group"><label>保存位置</label><div class="input-with-button"><el-input v-model="form.output" :disabled="live" placeholder="选择文件夹"/><el-button :disabled="live" :icon="FolderOpened" aria-label="选择保存目录" @click="pickOutput"/></div></div>
-                <div class="control-grid"><div class="control-group"><label>分段时长 (s)</label><el-input-number v-model="form.segmentSeconds" :disabled="live" :min="1" :max="3600" controls-position="right"/></div><div class="control-group"><label>分段大小 (MB)</label><el-input-number v-model="form.segmentMb" :disabled="live" :min="1" :max="4096" controls-position="right"/></div></div>
-                <p v-if="form.source === 'hantek'" class="device-warning"><InfoFilled /> NORMAL 模式尚未验证无间断采集</p>
-                <p v-else-if="rateNote && !rateOptions.length" class="device-warning"><InfoFilled /> {{ rateNote }}</p>
-                <div class="action-row"><el-button v-if="!live" type="primary" size="large" :icon="VideoPlay" :disabled="!nativeAvailable || !bridgeReady || !rateOptions.length" @click="start">开始采集</el-button><el-button v-else type="danger" size="large" :icon="VideoPause" :loading="stopping" @click="stop">停止并保存</el-button></div>
-              </section>
-              <section class="panel channel-panel">
-                <div class="panel-title"><h2>通道</h2><span class="panel-count">{{ selected.length }} / 4</span></div>
-                <div v-for="channel of channels" :key="channel.id" class="channel-row"><el-switch v-model="channel.enabled" :disabled="live" :aria-label="`启用 CH${channel.id+1}`"/><span class="channel-num">CH{{ channel.id + 1 }}</span><el-input v-model="channel.name" :disabled="live" maxlength="60" size="small" :aria-label="`通道 ${channel.id+1} 名称`"/><span class="wave-indicator" :style="{ backgroundColor: channel.color }"></span></div>
-              </section>
             </div>
+            <div ref="scopeViewport" class="scope-viewport"><canvas ref="scopeCanvas" class="scope-canvas"></canvas></div>
+            <div class="scope-foot">
+              <span>{{ previewFrameCount ? `${formatCount(previewFrameCount)} 点 / 窗口` : '未开始采集' }}</span>
+              <span>{{ form.unit }} <span class="muted">·</span> {{ selected.length }} CH</span>
+            </div>
+          </section>
+
+          <div class="record-metrics">
+            <div class="metric"><small>已采集</small><strong>{{ formatCount(captured) }}</strong><span>frames</span></div>
+            <div class="metric"><small>已写入</small><strong>{{ formatCount(written) }}</strong><span>frames</span></div>
+            <div class="metric"><small>缓冲队列</small><strong>{{ pending }}</strong><span>/ 128</span></div>
+            <div class="metric"><small>记录时长</small><strong>{{ formatSeconds(elapsed) }}</strong></div>
           </div>
-          <section class="panel log-panel"><div class="panel-title"><h2>事件</h2><span v-if="sessionPath" class="session-path" :title="sessionPath">{{ sessionPath }}</span></div><div class="event-list"><div v-if="!history.length" class="event-placeholder">暂无事件</div><div v-for="(item,index) in history.slice(0,8)" :key="index" class="event-row" :class="item.level"><time>{{ item.time }}</time><span>{{ item.message }}</span></div></div></section>
-        </template>
-        <template v-else>
-          <div class="splitter-grid">
-            <section class="panel">
-              <div class="panel-title"><h2>文件</h2></div>
-              <div class="control-group"><label>输入记录</label><div class="input-with-button"><el-input v-model="splitter.input" placeholder=".zwraw 文件或记录目录"/><el-button :icon="FolderOpened" aria-label="浏览输入记录" @click="pickSplitterInput">浏览</el-button></div></div>
-              <div class="control-group"><label>输出目录</label><div class="input-with-button"><el-input v-model="splitter.output" placeholder="选择文件夹"/><el-button :icon="FolderOpened" aria-label="浏览输出目录" @click="pickSplitterOutput">浏览</el-button></div></div>
+
+          <section class="event-area" :class="{ expanded: showLog }">
+            <button class="events-toggle" @click="showLog = !showLog">
+              <span>事件记录 <em>{{ history.length }}</em></span>
+              <component :is="showLog ? ArrowUp : ArrowDown" :size="15" />
+            </button>
+            <div v-if="showLog" class="event-list">
+              <div v-if="!history.length" class="events-empty">暂无记录</div>
+              <div v-for="(item, index) in history.slice(0, 12)" :key="index" class="event-item" :class="item.level">
+                <time>{{ item.at }}</time><span>{{ item.message }}</span>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <aside class="control-aside">
+          <div class="control-scroll">
+            <section class="settings-group">
+              <h2>采集</h2>
+              <div class="field"><label>设备</label>
+                <el-select v-model="form.source" :disabled="live" @change="changeSource">
+                  <el-option label="模拟设备" value="mock" />
+                  <el-option label="HT6004BX" value="hantek" />
+                </el-select>
+              </div>
+              <div class="field"><label>采样率</label>
+                <el-select v-model="form.rate" :disabled="live || !rates.length" filterable>
+                  <el-option v-for="item in rateOptions" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+              </div>
+              <div class="field"><label>电压单位</label>
+                <el-segmented v-model="form.unit" :options="['V', 'mV']" :disabled="live" block />
+              </div>
+              <div v-if="form.source === 'hantek'" class="sdk-caveat"><InfoFilled :size="15" />触发窗口采集，连续性未验证</div>
             </section>
-            <section class="panel">
-              <div class="panel-title"><h2>切分与导出</h2></div>
-              <div class="control-group"><label>通道</label><el-checkbox-group v-model="exportSelections" class="export-checks"><el-checkbox v-for="c of channels" :key="c.id" :value="c.id">CH{{ c.id + 1 }} · {{ c.name }}</el-checkbox></el-checkbox-group></div>
-              <div class="control-grid"><div class="control-group"><label>起始帧</label><el-input-number v-model="splitter.start" :min="0" :max="9007199254740991" controls-position="right"/></div><div class="control-group"><label>帧数 (0 = 全部)</label><el-input-number v-model="splitter.count" :min="0" :max="9007199254740991" controls-position="right"/><span class="sr-only">0 表示到记录结束</span></div><div class="control-group"><label>单文件帧数</label><el-input-number v-model="splitter.pointsPerFile" :min="256" :max="200000" :step="1000" controls-position="right"/></div><div class="control-group"><label>单位</label><el-segmented v-model="splitter.unit" :options="['V','mV']" block/></div></div>
-              <div class="action-row"><el-button type="primary" size="large" :icon="Download" :loading="exporting" @click="exportData">导出 CSV</el-button></div>
+
+            <section class="settings-group">
+              <div class="group-heading"><h2>通道</h2><small>{{ selected.length }} / 4</small></div>
+              <div v-for="ch in channels" :key="ch.id" class="channel-control" :class="{ off: !ch.enabled }">
+                <span class="channel-swatch" :style="{ background: ch.color }"></span>
+                <span class="channel-index">CH{{ ch.id + 1 }}</span>
+                <el-input v-model="ch.name" size="small" :disabled="live" maxlength="60" :aria-label="`CH${ch.id+1} 名称`" />
+                <el-switch v-model="ch.enabled" size="small" :disabled="live" :aria-label="`CH${ch.id+1} 开关`" />
+              </div>
+            </section>
+
+            <section class="settings-group">
+              <h2>记录</h2>
+              <div class="field"><label>保存目录</label>
+                <div class="path-input"><el-input v-model="form.output" :disabled="live" placeholder="选择记录文件夹" :title="form.output" /><el-button :icon="FolderOpened" :disabled="live" aria-label="选择保存目录" @click="pickFolder('record')" /></div>
+              </div>
+              <div class="numeric-fields">
+                <div class="field"><label>分段时长 <span>s</span></label><el-input-number v-model="form.segmentSeconds" :disabled="live" :min="1" :max="3600" controls-position="right" /></div>
+                <div class="field"><label>分段大小 <span>MB</span></label><el-input-number v-model="form.segmentMb" :disabled="live" :min="1" :max="4096" controls-position="right" /></div>
+              </div>
             </section>
           </div>
-        </template>
+          <div class="capture-actions">
+            <el-button v-if="!live" type="primary" size="large" :icon="VideoPlay" :disabled="!bridgeReady || !nativeAvailable || !rates.length || !selected.length" @click="beginRecord">开始采集</el-button>
+            <el-button v-else type="danger" size="large" :icon="VideoPause" :loading="stopping" @click="stopRecord">停止并保存</el-button>
+            <span v-if="sessionPath" :title="sessionPath" class="record-location">{{ sessionPath }}</span>
+            <span v-else class="action-hint">{{ live ? '正在写入' : '设备就绪后可开始' }}</span>
+          </div>
+        </aside>
+      </div>
+
+      <main v-else class="splitter-page">
+        <div class="splitter-intro"><h2>导出 CSV</h2><p>从记录会话按通道和样本范围导出</p></div>
+        <div v-if="errorText" class="inline-alert">{{ errorText }}</div>
+        <div class="splitter-layout">
+          <section class="split-panel">
+            <div class="split-head"><span class="step-number">01</span><h3>输入 / 输出</h3></div>
+            <div class="field"><label>采集记录</label><div class="path-input"><el-input v-model="splitter.input" placeholder=".zwraw 文件或记录目录" :title="splitter.input" /><el-button :icon="FolderOpened" aria-label="选择输入" @click="pickInput" /></div></div>
+            <div class="field"><label>导出位置</label><div class="path-input"><el-input v-model="splitter.output" placeholder="CSV 保存目录" :title="splitter.output" /><el-button :icon="FolderOpened" aria-label="选择输出目录" @click="pickFolder('export')" /></div></div>
+          </section>
+          <section class="split-panel">
+            <div class="split-head"><span class="step-number">02</span><h3>导出选项</h3></div>
+            <div class="field"><label>通道</label>
+              <el-checkbox-group v-model="exportSelections" class="export-channel-list">
+                <el-checkbox v-for="ch in channels" :key="ch.id" :value="ch.id"><span class="checkbox-label"><i :style="{ background: ch.color }"></i>CH{{ ch.id + 1 }}</span></el-checkbox>
+              </el-checkbox-group>
+            </div>
+            <div class="numeric-fields"><div class="field"><label>起始帧</label><el-input-number v-model="splitter.start" :min="0" :max="Number.MAX_SAFE_INTEGER" controls-position="right" /></div>
+              <div class="field"><label>导出帧数 <span>0 = 全部</span></label><el-input-number v-model="splitter.count" :min="0" :max="Number.MAX_SAFE_INTEGER" controls-position="right" /></div></div>
+            <div class="numeric-fields"><div class="field"><label>每份 CSV 帧数</label><el-input-number v-model="splitter.pointsPerFile" :min="256" :max="200000" controls-position="right" /></div>
+              <div class="field"><label>单位</label><el-segmented v-model="splitter.unit" :options="['V', 'mV']" block /></div></div>
+          </section>
+        </div>
+        <div class="splitter-footer"><span>zhuru-wave-v1 格式 · 按相同样本帧导出</span><el-button type="primary" size="large" :icon="Download" :loading="exporting" :disabled="!bridgeReady" @click="exportCsv">导出 CSV</el-button></div>
       </main>
+
+      <footer class="app-statusbar"><span class="status-connection" :class="{ ok: bridgeReady && nativeAvailable }"><i></i>{{ bridgeReady && nativeAvailable ? '采集服务已就绪' : '采集服务未连接' }}</span><span>Wave Collector · HT6004BX SDK</span></footer>
     </div>
   </div>
 </template>

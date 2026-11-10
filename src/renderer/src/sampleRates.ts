@@ -5,6 +5,7 @@
  *
  * The table is nominal hardware sample rate, NOT sustainable USB throughput.
  * User-facing selections intentionally do not require a connected device.
+ * VCDSO switches to SCAN above index 23; only NORMAL ranges are implemented.
  */
 export type SampleSource = 'mock' | 'hantek'
 
@@ -35,7 +36,7 @@ export function supportedSampleRates(source: SampleSource, mask: number): number
   if (source === 'mock') return [...MOCK_RATES]
   if (source !== 'hantek') return []
   const enabledCount = [0, 1, 2, 3].reduce((n, bit) => n + ((mask >> bit) & 1), 0)
-  return [...new Set(TIMEBASE_SECONDS.map((_, i) => Math.round(nominalHantekRate(i, enabledCount)))
+  return [...new Set(TIMEBASE_SECONDS.slice(0, 24).map((_, i) => Math.round(nominalHantekRate(i, enabledCount)))
     .filter(rate => rate >= 100))].sort((a, b) => b - a)
 }
 
