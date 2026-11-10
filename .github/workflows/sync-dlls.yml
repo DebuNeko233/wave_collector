@@ -1,0 +1,52 @@
+name: Sync x64 DLLs from zhuru_wave
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/sync-dlls.yml
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Wave Collector
+        uses: actions/checkout@v4
+        with:
+          path: target
+          persist-credentials: true
+      - name: Checkout existing DLL source repository
+        uses: actions/checkout@v4
+        with:
+          repository: DebuNeko233/zhuru_wave
+          ref: main
+          path: original
+          persist-credentials: false
+      - name: Copy exact x64 binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/vendor/hantek/dll/x64
+          for name in HTSoftDll.dll HTHardDll.dll HTDisplayDll.dll MeasDll.dll libwave.dll; do
+            test -s "original/desktop/src/native/$name"
+            cp "original/desktop/src/native/$name" "target/vendor/hantek/dll/x64/$name"
+            sha256sum "target/vendor/hantek/dll/x64/$name"
+          done
+      - name: Commit binaries to main
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add vendor/hantek/dll/x64/*.dll
+          if git diff --cached --quiet; then
+            echo "DLLs already synchronized"
+            exit 0
+          fi
+          git commit -m "chore(vendor): synchronize x64 DLLs from zhuru_wave"
+          git push origin HEAD:main
