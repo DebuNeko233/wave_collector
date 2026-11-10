@@ -19,3 +19,9 @@ ADC 数据取值 0～255，按厂商示例的 `（原始码值-128）×每格电
 ## 生产使用前
 
 请在目标 Windows 11 26H2 电脑上，结合正确版本的原厂驱动、SDK 和 HT6004BX，验证所有可用时基/通道组合、设备断开/重连、长时间 USB 吞吐、采样段重复与间隙、磁盘写入、丢数据报警和电压标定。SDK 镜像与运行库版本不同时不得混用，详见 `vendor/hantek/README.md`。
+
+## 手册档位 / 无设备状态
+
+原厂 HT6004BX SDK 的时基表（Table 1/2）采用 2 ns/div～1000 s/div，常规时基档位按每格 250 个采样点计算，2 ns～500 ns 依据启用通道数限制单/双/四通道最高采样率。新版本界面和 C++ 统一使用这张固定档位表，拔掉 USB 仍可选择预设采样率。选项不代表设备已连接，真正开始采集才会搜索、配置设备并回读采样率。1 MSa/s 不是说明书的离散档位；相邻档位为 1.25 MSa/s 和 500 kSa/s。
+
+源文件：`CircuitAnalysis/Hantek` 镜像中的 `6XXX USB Scope/HT6004BX_SDK/Manual/SDK_HTHardDLL-EN.pdf`，Table 1 和 Table 2；产品手册：<https://www.hantek.com/Product/Hantek6000BX/HT6004BX_Manual.pdf>。

@@ -14,8 +14,10 @@
     "build:win": "pnpm build && electron-builder --win nsis",
     "build:unpack": "pnpm build && electron-builder --dir",
     "test:native": "node scripts/test-native.mjs",
-    "test": "pnpm build:native && pnpm test:native",
-    "start": "electron-vite preview"
+    "test": "pnpm test:rates && pnpm build:native && pnpm test:native",
+    "start": "electron-vite preview",
+    "test:rates": "node --experimental-strip-types scripts/test-rate-table.mjs",
+    "test:preload": "node scripts/test-preload.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",

@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Connection, FolderOpened, VideoPlay, VideoPause, Download, Scissor, InfoFilled, DataLine } from '@element-plus/icons-vue'
 import type { AcqEvent, RecordingConfig, ExportConfig } from '../../preload/index'
+import { supportedSampleRates, preferredSampleRate } from './sampleRates'
 
 type Channel = { id: number, enabled: boolean, name: string, color: string }
 const channels = reactive<Channel[]>([
@@ -34,35 +35,22 @@ const history = ref<{ time: string, message: string, level: 'info' | 'error' | '
 const selected = computed(() => channels.filter(c => c.enabled))
 const selectedMask = computed(() => channels.reduce((mask, c) => mask | (c.enabled ? (1 << c.id) : 0), 0))
 const rateOptions = ref<{ label: string, value: number }[]>([])
-const rateLoading = ref(false)
 const rateNote = ref('等待查询设备支持的采样率')
 const exportSelections = ref<number[]>([0, 1])
-let rateRequestId = 0
 const rateLabel = (r: number) => r >= 1000000
   ? `${Number((r / 1000000).toFixed(3))} MSa/s`
   : r >= 1000 ? `${Number((r / 1000).toFixed(3))} kSa/s` : `${r} Sa/s`
-async function refreshRates() {
-  const seq = ++rateRequestId
+function refreshRates() {
   const mask = selectedMask.value
-  rateOptions.value = []
-  if (!mask) { rateNote.value = '请至少启用一个通道'; return }
-  rateLoading.value = true
-  try {
-    const cap = await window.acquisition.capabilities(form.source, mask)
-    if (seq !== rateRequestId) return
-    rateOptions.value = cap.rates.map(value => ({ label: rateLabel(value), value }))
-    if (!cap.rates.includes(form.rate)) form.rate = cap.recommended
-    rateNote.value = cap.note
-    log(`采样档位已更新：${cap.rates.length} 档（${cap.note}）`)
-  } catch (e) {
-    if (seq !== rateRequestId) return
-    rateNote.value = String(e)
-    log('读取采样档位失败：'+String(e), 'warn')
-  } finally {
-    if (seq === rateRequestId) rateLoading.value = false
-  }
+  const rates = supportedSampleRates(form.source, mask)
+  rateOptions.value = rates.map(value => ({ label: rateLabel(value), value }))
+  if (rates.length && !rates.includes(form.rate)) form.rate = preferredSampleRate(rates)
+  rateNote.value = mask === 0 ? '请至少启用一个通道' : rates.length
+    ? '按 HT6004BX SDK 说明书时基表选择；实际采样率以设备回读为准'
+    : '未找到有效采样率'
 }
-watch([() => form.source, selectedMask], () => { if (!live.value) void refreshRates() })
+watch([() => form.source, selectedMask], () => { if (!live.value) refreshRates() })
+
 const displayedRate = computed(() => {
   const r = actualRate.value || form.rate
   if (r >= 1000000) return (r / 1000000).toFixed(2) + ' MSa/s'
@@ -159,31 +147,45 @@ function handleEvent(event: AcqEvent) {
     case 'log': log(event.message || '原生进程消息','warn');break
   }
 }
+const bridgeReady = ref(false)
 let unsubscribe: (() => void) | undefined
 onMounted(async () => {
-  unsubscribe = window.acquisition.onEvent(handleEvent)
+  // Show manual-based rates even when preload/driver/device is unavailable.
+  refreshRates()
   const saved = localStorage.getItem('zhuru-acq-ui-settings')
   if (saved) {
     try {
       const obj = JSON.parse(saved)
-      if (obj.names?.length === 4) for (let i = 0;i<4;i++) channels[i].name = String(obj.names[i]).slice(0,60)
+      if (obj.names?.length === 4) for (let i = 0; i < 4; i++) channels[i].name = String(obj.names[i]).slice(0, 60)
       if (obj.output) form.output = obj.output
-    } catch { /* ignore untrusted local settings */ }
+    } catch { /* ignore invalid saved settings */ }
   }
+  window.addEventListener('resize', scheduleDraw)
+  const api = window.acquisition
+  if (!api || typeof api.status !== 'function' || typeof api.onEvent !== 'function') {
+    nativeAvailable.value = false
+    log('Electron preload 未加载。请重新构建并从 Electron 启动应用。', 'error')
+    return
+  }
+  bridgeReady.value = true
+  unsubscribe = api.onEvent(handleEvent)
   try {
-    const status = await window.acquisition.status()
+    const status = await api.status()
     nativeAvailable.value = status.available
     if (!form.output) form.output = status.defaultOutput
     splitter.output = form.output
-    await refreshRates()
-  } catch (e) { log(String(e),'error') }
-  window.addEventListener('resize', scheduleDraw)
+  } catch (e) {
+    nativeAvailable.value = false
+    log(String(e), 'error')
+  }
 })
+
 onBeforeUnmount(() => { unsubscribe?.();window.removeEventListener('resize',scheduleDraw) })
-async function pickOutput() { const p=await window.acquisition.chooseDirectory();if(p)form.output=p }
-async function pickSplitterInput() { const p=await window.acquisition.chooseInput();if(p)splitter.input=p }
-async function pickSplitterOutput() { const p=await window.acquisition.chooseDirectory();if(p)splitter.output=p }
+async function pickOutput() { if (!bridgeReady.value) return ElMessage.error('Electron 桥接不可用'); const p=await window.acquisition.chooseDirectory();if(p)form.output=p }
+async function pickSplitterInput() { if (!bridgeReady.value) return ElMessage.error('Electron 桥接不可用'); const p=await window.acquisition.chooseInput();if(p)splitter.input=p }
+async function pickSplitterOutput() { if (!bridgeReady.value) return ElMessage.error('Electron 桥接不可用'); const p=await window.acquisition.chooseDirectory();if(p)splitter.output=p }
 async function start() {
+  if (!bridgeReady.value) return ElMessage.error('Electron 桥接不可用')
   const mask = selectedMask.value
   if (!mask) return ElMessage.warning('至少选择一个采集通道')
   if (!form.output) return ElMessage.warning('请选择保存路径')
@@ -201,12 +203,14 @@ async function start() {
   } catch (e) { log(String(e),'error');ElMessage.error(String(e)) }
 }
 async function stop() {
+  if (!bridgeReady.value) return ElMessage.error('Electron 桥接不可用')
   if (!live.value || stopping.value) return
   stopping.value = true
   try { await window.acquisition.stop();log('已请求停止，原生进程正在冲刷缓冲数据…') }
   catch (e) { stopping.value=false;ElMessage.error(String(e)) }
 }
 async function exportData() {
+  if (!bridgeReady.value) return ElMessage.error('Electron 桥接不可用')
   if (!splitter.input || !splitter.output) return ElMessage.warning('请选择输入记录和导出目录')
   splitter.mask = exportSelections.value.reduce((mask, id) => mask | (1 << id), 0)
   if (!splitter.mask) return ElMessage.warning('请选择输出通道')
@@ -244,7 +248,7 @@ async function warnHantek() {
       </header>
       <main class="page-scroll">
         <template v-if="tab === 'capture'">
-          <div v-if="!nativeAvailable" class="warning-banner">缺少采集程序 zw_acq。请运行 <code>pnpm build:native</code>。</div>
+          <div v-if="!bridgeReady" class="warning-banner">Electron 桥接不可用，请重启桌面应用。</div><div v-else-if="!nativeAvailable" class="warning-banner">缺少采集程序 zw_acq。请运行 <code>pnpm build:native</code>。</div>
           <div class="stats-grid">
             <div class="stat"><span>已采集</span><strong>{{ formatInt(captured) }}</strong></div>
             <div class="stat"><span>已写入</span><strong>{{ formatInt(written) }}</strong></div>
@@ -267,14 +271,14 @@ async function warnHantek() {
                 <div class="panel-title"><h2>采集设置</h2></div>
                 <div class="control-group"><label>设备</label><el-select v-model="form.source" :disabled="live" @change="warnHantek"><el-option label="模拟设备" value="mock"/><el-option label="HT6004BX（厂商 SDK）" value="hantek"/></el-select></div>
                 <div class="control-grid">
-                  <div class="control-group"><label>采样率</label><el-select v-model="form.rate" :disabled="live || rateLoading || !rateOptions.length" :loading="rateLoading" placeholder="查询设备档位"><el-option v-for="option in rateOptions" :key="option.value" :label="option.label" :value="option.value"/></el-select></div>
+                  <div class="control-group"><label>采样率</label><el-select v-model="form.rate" :disabled="live || !rateOptions.length" placeholder="查询设备档位"><el-option v-for="option in rateOptions" :key="option.value" :label="option.label" :value="option.value"/></el-select></div>
                   <div class="control-group"><label>单位</label><el-segmented v-model="form.unit" :options="['V', 'mV']" :disabled="live" block/></div>
                 </div>
                 <div class="control-group"><label>保存位置</label><div class="input-with-button"><el-input v-model="form.output" :disabled="live" placeholder="选择文件夹"/><el-button :disabled="live" :icon="FolderOpened" aria-label="选择保存目录" @click="pickOutput"/></div></div>
                 <div class="control-grid"><div class="control-group"><label>分段时长 (s)</label><el-input-number v-model="form.segmentSeconds" :disabled="live" :min="1" :max="3600" controls-position="right"/></div><div class="control-group"><label>分段大小 (MB)</label><el-input-number v-model="form.segmentMb" :disabled="live" :min="1" :max="4096" controls-position="right"/></div></div>
                 <p v-if="form.source === 'hantek'" class="device-warning"><InfoFilled /> NORMAL 模式尚未验证无间断采集</p>
                 <p v-else-if="rateNote && !rateOptions.length && !rateLoading" class="device-warning"><InfoFilled /> {{ rateNote }}</p>
-                <div class="action-row"><el-button v-if="!live" type="primary" size="large" :icon="VideoPlay" :disabled="!nativeAvailable || rateLoading || !rateOptions.length" @click="start">开始采集</el-button><el-button v-else type="danger" size="large" :icon="VideoPause" :loading="stopping" @click="stop">停止并保存</el-button></div>
+                <div class="action-row"><el-button v-if="!live" type="primary" size="large" :icon="VideoPlay" :disabled="!nativeAvailable || !bridgeReady || !rateOptions.length" @click="start">开始采集</el-button><el-button v-else type="danger" size="large" :icon="VideoPause" :loading="stopping" @click="stop">停止并保存</el-button></div>
               </section>
               <section class="panel channel-panel">
                 <div class="panel-title"><h2>通道</h2><span class="panel-count">{{ selected.length }} / 4</span></div>

@@ -36,3 +36,9 @@ pnpm build:win
 HT6004BX 原厂 `YT_NORMAL` / `dsoHTGetData` 读取的是**重复触发窗口**；这**不证明**跨窗口无间断采样，尤其不保证持续 1 MSa/s。录制元信息标记 `UNVERIFIED_vendor_normal_trigger_windows_may_have_gaps`。若需要真实连续流式采样，需实机验证支持的 SCAN/ROLL 模式和硬件传输能力，不能以分段数据的递增索引冒充硬件连续样本。采样电压也尚未现场校准。
 
 厂商 `.lib` 和 DLL 的来源、版本及再分发许可说明见 [SDK 文档](vendor/hantek/README.md)；公开分发厂商二进制前须确认授权。
+
+## 采样率与 Electron 桥接
+
+采样率选项现在直接按 HT6004BX 原厂 SDK 手册时基表（索引 0～35）生成，不必先接设备；1 MSa/s 附近的相邻档位为 1.25 MSa/s 和 500 kSa/s，默认取最近的 1.25 MSa/s。列表表示**标称硬件档位**，不是 USB 无缝流式吞吐保障。实际记录采样率以 `dsoGetSampleRate` 返回值为准。
+
+Electron 37 + electron-vite 输出预加载文件为 `out/preload/index.mjs`。主进程必须使用相同文件名，否则 `window.acquisition` 未定义。界面在桥接失效时会展示明确错误，采样率列表仍可使用。

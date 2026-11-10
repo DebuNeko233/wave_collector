@@ -483,7 +483,7 @@ static int programMain(int argc, char** argv) {
             else if (source == "hantek") {
                 HantekDevice dev;
                 rates = dev.rateChoices(mask);
-                note = "HT6004BX 厂商 SDK 档位；NORMAL 模式跨采集窗口连续性未验证";
+                note = "HT6004BX SDK 说明书时基表（无需连接设备）；NORMAL 触发窗口不保证无缝连续";
             }
 #endif
             else throw std::runtime_error("Unknown device source or unsupported operating system");

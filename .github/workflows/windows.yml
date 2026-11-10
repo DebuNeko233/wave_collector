@@ -22,6 +22,8 @@ jobs:
         run: pnpm test
       - name: Full app build and unpacked package
         run: pnpm build:unpack
+      - name: Verify preload path
+        run: pnpm test:preload
       - name: Verify native SDK dependencies
         shell: pwsh
         run: |

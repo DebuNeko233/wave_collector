@@ -27,14 +27,23 @@ class HantekDevice final : public Device {
         if (!status) throw std::runtime_error(std::string("HT6004BX SDK call failed: ") + op);
     }
     static std::vector<std::pair<double, WORD>> rateTable(int mask) {
-        channelsFromMask(mask);
+        const int channelCount = static_cast<int>(channelsFromMask(mask).size());
+        // HT6004BX SDK user manual, Table 1 and Table 2 (timebase indices 0..35).
+        // Listing nominal sample-rate options does not need a USB connection.
+        constexpr std::array<double, 36> timebaseSeconds = {{
+            2e-9, 5e-9, 10e-9, 20e-9, 50e-9, 100e-9, 200e-9, 500e-9,
+            1e-6, 2e-6, 5e-6, 10e-6, 20e-6, 50e-6, 100e-6, 200e-6, 500e-6,
+            1e-3, 2e-3, 5e-3, 10e-3, 20e-3, 50e-3, 100e-3, 200e-3, 500e-3,
+            1, 2, 5, 10, 20, 50, 100, 200, 500, 1000
+        }};
+        static_assert(timebaseSeconds.size() == MAX_TIMEDIV_NUM);
         std::vector<std::pair<double, WORD>> out;
-        for (WORD index = 0; index < MAX_TIMEDIV_NUM; ++index) {
-            // The vendor helper maps the timebase index and physically enabled
-            // channel bitmask to a nominal samples-per-second value.
-            const ULONG rate = dsoSFGetSampleRate(index, 0, static_cast<WORD>(mask), 0);
-            if (rate >= 100 && rate <= 1000000000UL)
-                out.emplace_back(static_cast<double>(rate), index);
+        for (WORD index = 0; index < timebaseSeconds.size(); ++index) {
+            double rate;
+            if (index <= 6) rate = channelCount == 1 ? 1e9 : channelCount == 2 ? 5e8 : 2.5e8;
+            else if (index == 7) rate = channelCount <= 2 ? 5e8 : 2.5e8;
+            else rate = std::round(250.0 / timebaseSeconds[index]);
+            if (rate >= 100.0) out.emplace_back(rate, index);
         }
         std::sort(out.begin(), out.end(), [](auto a, auto b) { return a.first > b.first; });
         out.erase(std::unique(out.begin(), out.end(), [](auto a, auto b) { return a.first == b.first; }), out.end());
@@ -42,15 +51,9 @@ class HantekDevice final : public Device {
     }
 public:
     std::vector<double> rateChoices(int mask) {
-        // Enumerating rates must not alter the capture state, but a missing
-        // device must not be presented as connected hardware.
-        short deviceInfo[32]{};
-        if (!dsoHTSearchDevice(deviceInfo))
-            throw std::runtime_error("HT6004BX not found; check USB connection and driver");
-        auto entries = rateTable(mask);
-        if (entries.empty()) throw std::runtime_error("Vendor SDK returned no supported timebases");
+        const auto table = rateTable(mask);
         std::vector<double> rates;
-        for (const auto& entry : entries) rates.push_back(entry.first);
+        for (const auto& item : table) rates.push_back(item.first);
         return rates;
     }
     double connect(double requested, int mask) override {

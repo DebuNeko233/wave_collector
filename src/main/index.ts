@@ -90,7 +90,7 @@ const createWindow = (): void => {
     title: 'Zhuru Wave Acquisition',
     autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(dirname, '../preload/index.js'),
+      preload: path.join(dirname, '../preload/index.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false
