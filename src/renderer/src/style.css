@@ -52,6 +52,8 @@ button{cursor:pointer}
 .event-area{border:1px solid #293748;background:#141f2e;border-radius:10px;flex:0 0 auto;overflow:hidden}
 .events-toggle{width:100%;background:transparent;border:0;color:#9db0c3;min-height:36px;display:flex;align-items:center;justify-content:space-between;padding:0 15px;font-weight:600;font-size:12px}
 .events-toggle:hover{color:#edf7ff;background:#19273a}
+.events-toggle .events-chevron{display:inline-flex;align-items:center;justify-content:center;flex:0 0 14px;width:14px;height:14px;font-size:14px;line-height:1}
+.events-toggle .events-chevron svg{display:block;width:14px;height:14px;max-width:14px;max-height:14px}
 .events-toggle span{display:flex;align-items:center;gap:9px}.events-toggle em{font-style:normal;font-size:11px;color:#7188a1}
 .event-list{max-height:174px;overflow:auto;padding:7px 14px 11px;border-top:1px solid #28364a}
 .event-item{padding:5px 0;display:flex;align-items:flex-start;gap:15px;font-size:12px;color:#a1b2c3;line-height:1.5;word-break:break-all}

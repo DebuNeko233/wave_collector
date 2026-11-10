@@ -392,7 +392,7 @@ async function changeSource() {
           <section class="event-area" :class="{ expanded: showLog }">
             <button class="events-toggle" @click="showLog = !showLog">
               <span>事件记录 <em>{{ history.length }}</em></span>
-              <component :is="showLog ? ArrowUp : ArrowDown" :size="15" />
+              <el-icon :size="14" class="events-chevron"><component :is="showLog ? ArrowUp : ArrowDown" /></el-icon>
             </button>
             <div v-if="showLog" class="event-list">
               <div v-if="!history.length" class="events-empty">暂无记录</div>
