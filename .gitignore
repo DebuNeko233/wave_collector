@@ -6,6 +6,11 @@ resources/bin/*
 !resources/bin/.gitkeep
 vendor/hantek/*
 !vendor/hantek/README.md
+!vendor/hantek/include/
+!vendor/hantek/include/*.h
+!vendor/hantek/lib/
+!vendor/hantek/lib/x64/
+!vendor/hantek/lib/x64/*.lib
 !vendor/hantek/dll/
 vendor/hantek/dll/*
 !vendor/hantek/dll/x64/
