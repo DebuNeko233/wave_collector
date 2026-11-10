@@ -6,6 +6,11 @@ resources/bin/*
 !resources/bin/.gitkeep
 vendor/hantek/*
 !vendor/hantek/README.md
+!vendor/hantek/dll/
+vendor/hantek/dll/*
+!vendor/hantek/dll/x64/
+vendor/hantek/dll/x64/*
+!vendor/hantek/dll/x64/*.dll
 *.zwraw
 recordings/
 exports/

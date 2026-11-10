@@ -1,11 +1,13 @@
-# 本地厂商 SDK 文件（请勿提交到公开仓库）
+# Hantek x64 DLL
 
-如果已取得 HT6004BX 厂商的合法 SDK，可在 `vendor/hantek/dll/x64/` 放置：
+`vendor/hantek/dll/x64/` 保存从本账号现有 [zhuru_wave](https://github.com/DebuNeko233/zhuru_wave) 归档工程同步的五个 DLL：
 
-- `HTSoftDll.dll`
-- `HTHardDll.dll`
-- `libwave.dll`（**旧 zhuru_wave 项目自研封装**，并非原厂 SDK 内容）
+- `HTSoftDll.dll`、`HTHardDll.dll`：原厂硬件接口依赖；
+- `HTDisplayDll.dll`、`MeasDll.dll`：原厂显示 / 测量组件；
+- `libwave.dll`：原 `zhuru_wave` 的 C++ 封装，并非原厂 DLL。
 
-根据实际依赖可能还要放置 `HTDisplayDll.dll`、`MeasDll.dll`。`pnpm build:native` 会把本地 DLL 拷贝到 `resources/bin/`。
+`pnpm build:native` 会将 DLL 复制到 `resources/bin/`，使开发版与 Windows 打包版包含运行所需依赖。驱动仍需要单独安装。
 
-**限制：** 当前 `legacy` 源使用旧 `libwave.dll` 的重复采集轮询，无法证明采样时间轴连续无缝，不能用于要求无丢点的生产记录；完整 SDK 直接读数的独立适配器仍待现场硬件联调。
+**授权说明：** 这些二进制不因存放于本仓库而自动获得开源许可。原厂 DLL 的版权归其权利人所有，使用/再次分发仍需遵守厂商许可。本仓库尚未附有可以核实的原厂再分发条款；如无相应授权，应撤下公开 DLL 并改为用户本地安装。
+
+**采集限制：** 当前 `legacy` 模式通过旧 `libwave.dll` 轮询获取采集块，不能证明块间时间轴无缝、无重复或无丢采样。要用于生产连续记录，需要用原厂 SDK 与实际设备完成验证。

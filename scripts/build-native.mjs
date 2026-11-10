@@ -28,8 +28,7 @@ if (!source) throw new Error(`Compiled ${binaryName} was not found`)
 const dest = join(root, 'resources', 'bin')
 mkdirSync(dest, { recursive: true })
 copyFileSync(source, join(dest, binaryName))
-// The user's licensed SDK files are local, never checked in or distributed by default.
-// Developers may opt in by supplying vendor/hantek/dll/x64 contents.
+// Copy x64 DLL dependencies (vendor redistribution rights must be verified by the maintainer).
 if (process.platform === 'win32') {
   const vendor = join(root, 'vendor', 'hantek', 'dll', 'x64')
   if (existsSync(vendor)) {

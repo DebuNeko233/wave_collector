@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Connection, FolderOpened, VideoPlay, VideoPause, Download, Setting, DataLine, Scissor, InfoFilled } from '@element-plus/icons-vue'
+import { Connection, FolderOpened, VideoPlay, VideoPause, Download, Scissor, InfoFilled, DataLine } from '@element-plus/icons-vue'
 import type { AcqEvent, RecordingConfig, ExportConfig } from '../../preload/index'
 
 type Channel = { id: number, enabled: boolean, name: string, color: string }
@@ -119,7 +119,6 @@ function drawPreview() {
     ctx.fillStyle='#8498af'
     ctx.fillText(`${(center + span/2).toFixed(1)} ${form.unit}`, 4, 19)
     ctx.fillText(`${(center - span/2).toFixed(1)}`, 4, height-15)
-    ctx.fillText('REC · 最近一个采集块的 Min/Max 包络（不是整个文件）',gridLeft+7,height-8)
   }
 }
 function scheduleDraw() {
@@ -222,79 +221,79 @@ async function warnLegacy() {
   if (form.source !== 'legacy') return
   await ElMessageBox.alert('当前旧 libwave.dll 提供的是重复读取接口。它尚未通过连续采样、不重不漏、采样时钟校准的现场验证，不能视为生产级无缝连续采集。请先用模拟设备验证导出流程，再联调原厂 SDK。','实验性旧 DLL 采集', { type: 'warning' })
 }
-</script>
-
 <template>
   <div class="app-shell">
     <aside class="side-bar">
-      <div class="brand-mark"><DataLine :size="24" /></div>
-      <div class="brand-text"><b>ZHURU <span>WAVE</span></b><small>ACQUISITION STUDIO</small></div>
-      <div class="side-navigation">
-        <button class="nav-link" :class="{ active: tab === 'capture' }" @click="tab='capture'"><Connection :size="19"/> 连续采集</button>
-        <button class="nav-link" :class="{ active: tab === 'splitter' }" @click="tab='splitter'"><Scissor :size="19"/> 记录分割器</button>
-      </div>
+      <div class="brand"><span class="brand-mark"><DataLine :size="23" /></span><strong>WAVE <span>COLLECTOR</span></strong></div>
+      <nav class="side-navigation" aria-label="主导航">
+        <button class="nav-link" :class="{ active: tab === 'capture' }" @click="tab = 'capture'"><Connection :size="18" /> 连续采集</button>
+        <button class="nav-link" :class="{ active: tab === 'splitter' }" @click="tab = 'splitter'"><Scissor :size="18" /> 记录分割器</button>
+      </nav>
       <div class="sidebar-spacer"></div>
-      <div class="side-note"><span class="side-note-dot"></span> 运行环境 <strong>Windows x64</strong><p>高吞吐写盘交给 C++，波形预览独立降采样。</p></div>
-      <div class="side-footer">Zhuru Wave Acquisition <span>v0.1.0</span></div>
+      <div class="side-footer">v0.1.0</div>
     </aside>
     <div class="main-content">
-      <header class="top-bar"><div class="top-title"><span>{{ tab === 'capture' ? '连续波形采集' : '离线记录分割器' }}</span><small>{{ tab === 'capture' ? 'Continuous waveform recorder' : 'Recording export & segmentation' }}</small></div>
-        <div class="top-right"><span class="status-dot" :class="{ working: live }"></span>{{ live ? (stopping ? '正在停止…' : '采集中') : '空闲' }}<span class="divider-v"></span><span class="environment">MSVC C++ / Electron</span></div>
+      <header class="top-bar">
+        <h1>{{ tab === 'capture' ? '连续采集' : '记录分割器' }}</h1>
+        <div class="top-right">
+          <span v-if="tab === 'capture'" class="top-rate" :title="actualRate ? '设备实际采样率' : '预设采样率，尚未由设备确认'">{{ displayedRate }}</span>
+          <span class="status"><i class="status-dot" :class="{ working: live }"></i>{{ live ? (stopping ? '正在停止' : '采集中') : '空闲' }}</span>
+        </div>
       </header>
       <main class="page-scroll">
         <template v-if="tab === 'capture'">
-          <section class="intro"><div><p class="eyebrow">ACQUISITION WORKSPACE</p><h1>让每一次扫描，都有迹可循。</h1><p>同步记录多通道波形，原生连续写盘，按需导出到 zhuru_wave 分析。</p></div><div class="rate-head"><small>当前采样率</small><strong>{{ displayedRate }}</strong><span>{{ actualRate ? '设备报告值' : '请求值 / 待设备确认' }}</span></div></section>
-          <div v-if="!nativeAvailable" class="warning-banner">原生程序 zw_acq 尚未找到，请先运行 <code>pnpm build:native</code>。</div>
+          <div v-if="!nativeAvailable" class="warning-banner">缺少采集程序 zw_acq。请运行 <code>pnpm build:native</code>。</div>
           <div class="stats-grid">
-            <div class="stat"><span>采集帧数</span><strong>{{ formatInt(captured) }}</strong><small>每帧包含所有选中通道</small></div>
-            <div class="stat"><span>已安全写入</span><strong>{{ formatInt(written) }}</strong><small>原生二进制记录</small></div>
-            <div class="stat"><span>缓冲队列</span><strong>{{ backlog }} <em>/ 128</em></strong><small>超时将报错并停止</small></div>
-            <div class="stat"><span>采集通道</span><strong>{{ selected.length }} <em>/ 4</em></strong><small>同一采样批次对齐</small></div>
+            <div class="stat"><span>已采集</span><strong>{{ formatInt(captured) }}</strong></div>
+            <div class="stat"><span>已写入</span><strong>{{ formatInt(written) }}</strong></div>
+            <div class="stat"><span>待写缓冲</span><strong>{{ backlog }} <em>/ 128</em></strong></div>
           </div>
           <div class="workspace-grid">
             <section class="panel chart-panel">
-              <div class="panel-title"><div><h2>实时波形</h2><p>每 100 ms 更新一次显示数据，原始数据直接写盘</p></div><el-tag :type="live ? 'success' : 'info'" effect="plain">{{ live ? 'LIVE' : 'STANDBY' }}</el-tag></div>
+              <div class="panel-title"><h2>实时波形</h2></div>
               <div class="wave-list">
                 <div v-for="channel of selected" :key="channel.id" class="wave-card">
-                  <div class="wave-label"><span class="wave-indicator" :style="{ backgroundColor:channel.color }"></span><b>{{channel.name}}</b><small>CH{{channel.id+1}}</small><span>{{form.unit}}</span></div>
+                  <div class="wave-label"><span class="wave-indicator" :style="{ backgroundColor: channel.color }"></span><b>{{ channel.name }}</b><small>CH{{ channel.id + 1 }}</small><span>{{ form.unit }}</span></div>
                   <canvas :ref="el => updateCanvasRef(channel.id, el)" class="wave-canvas"></canvas>
                 </div>
-                <div v-if="selected.length === 0" class="empty-chart">请至少启用一个通道</div>
+                <div v-if="selected.length === 0" class="empty-chart">选择采集通道以预览波形</div>
               </div>
-              <p class="footnote">Min/Max 包络保留瞬态峰值；该视图不用于证明连续采集无丢点。{{ continuity.includes('UNVERIFIED') ? '当前旧版硬件读取的连续性未校验。' : '' }}</p>
+              <p v-if="continuity.includes('UNVERIFIED')" class="safety-note"><InfoFilled :size="15"/> 旧 DLL 的跨窗口连续性尚未验证</p>
             </section>
             <div class="controls-column">
-              <section class="panel configuration"><div class="panel-title"><div><h2><Setting class="title-icon"/> 采集配置</h2><p>支持设备允许的采样速率</p></div></div>
-                <div class="control-group"><label>采集设备</label><el-select v-model="form.source" :disabled="live" @change="warnLegacy" style="width:100%"><el-option label="模拟设备（安全演示）" value="mock"/><el-option label="HT6004BX · 旧 DLL（实验性）" value="legacy"/></el-select></div>
-                <div class="control-group"><label>采样率档位（设备可调范围）</label><el-select v-model="form.rate" :disabled="live || rateLoading || !rateOptions.length" :loading="rateLoading" style="width:100%" placeholder="请先查询设备采样能力"><el-option v-for="option in rateOptions" :key="option.value" :label="option.label" :value="option.value"/></el-select><small>{{ rateNote }}。实际速率在启动后回读</small></div>
-                <div class="control-group"><label>电压显示 / CSV 单位</label><el-segmented v-model="form.unit" :options="['V','mV']" :disabled="live" block/></div>
-                <div class="control-group"><label>存储根目录</label><div class="input-with-button"><el-input v-model="form.output" :disabled="live" placeholder="选择采集输出目录"/><el-button :disabled="live" :icon="FolderOpened" @click="pickOutput"/></div></div>
-                <div class="control-grid"><div class="control-group"><label>最大分段时长（秒）</label><el-input-number v-model="form.segmentSeconds" :disabled="live" :min="1" :max="3600" controls-position="right"/></div><div class="control-group"><label>最大分段大小（MB）</label><el-input-number v-model="form.segmentMb" :disabled="live" :min="1" :max="4096" controls-position="right"/></div></div>
-                <div class="action-row"><el-button v-if="!live" type="primary" size="large" :icon="VideoPlay" :disabled="!nativeAvailable || rateLoading || !rateOptions.length" @click="start">开始连续采集</el-button><el-button v-else type="danger" size="large" :icon="VideoPause" :loading="stopping" @click="stop">停止并保存</el-button></div>
-                <p v-if="form.source === 'legacy'" class="device-warning"><InfoFilled/> 旧 DLL 只提供轮询抓取；跨窗口连续性未验证。正式连续采集仍需原厂 SDK 联调。</p>
+              <section class="panel configuration">
+                <div class="panel-title"><h2>采集设置</h2></div>
+                <div class="control-group"><label>设备</label><el-select v-model="form.source" :disabled="live" @change="warnLegacy"><el-option label="模拟设备" value="mock"/><el-option label="HT6004BX（实验性）" value="legacy"/></el-select></div>
+                <div class="control-grid">
+                  <div class="control-group"><label>采样率</label><el-select v-model="form.rate" :disabled="live || rateLoading || !rateOptions.length" :loading="rateLoading" placeholder="查询设备档位"><el-option v-for="option in rateOptions" :key="option.value" :label="option.label" :value="option.value"/></el-select></div>
+                  <div class="control-group"><label>单位</label><el-segmented v-model="form.unit" :options="['V', 'mV']" :disabled="live" block/></div>
+                </div>
+                <div class="control-group"><label>保存位置</label><div class="input-with-button"><el-input v-model="form.output" :disabled="live" placeholder="选择文件夹"/><el-button :disabled="live" :icon="FolderOpened" aria-label="选择保存目录" @click="pickOutput"/></div></div>
+                <div class="control-grid"><div class="control-group"><label>分段时长 (s)</label><el-input-number v-model="form.segmentSeconds" :disabled="live" :min="1" :max="3600" controls-position="right"/></div><div class="control-group"><label>分段大小 (MB)</label><el-input-number v-model="form.segmentMb" :disabled="live" :min="1" :max="4096" controls-position="right"/></div></div>
+                <p v-if="form.source === 'legacy'" class="device-warning"><InfoFilled /> 旧 DLL 尚未验证无丢点连续采集</p>
+                <p v-else-if="rateNote && !rateOptions.length && !rateLoading" class="device-warning"><InfoFilled /> {{ rateNote }}</p>
+                <div class="action-row"><el-button v-if="!live" type="primary" size="large" :icon="VideoPlay" :disabled="!nativeAvailable || rateLoading || !rateOptions.length" @click="start">开始采集</el-button><el-button v-else type="danger" size="large" :icon="VideoPause" :loading="stopping" @click="stop">停止并保存</el-button></div>
               </section>
-              <section class="panel channel-panel"><div class="panel-title"><div><h2>采集通道</h2><p>支持自由启用和自定义名称</p></div></div>
-                <div v-for="channel of channels" :key="channel.id" class="channel-row"><el-switch v-model="channel.enabled" :disabled="live"/><span class="channel-num">CH{{channel.id+1}}</span><el-input v-model="channel.name" :disabled="live" maxlength="60" size="small"/><span class="wave-indicator" :style="{ backgroundColor:channel.color }"></span></div>
+              <section class="panel channel-panel">
+                <div class="panel-title"><h2>通道</h2><span class="panel-count">{{ selected.length }} / 4</span></div>
+                <div v-for="channel of channels" :key="channel.id" class="channel-row"><el-switch v-model="channel.enabled" :disabled="live" :aria-label="`启用 CH${channel.id+1}`"/><span class="channel-num">CH{{ channel.id + 1 }}</span><el-input v-model="channel.name" :disabled="live" maxlength="60" size="small" :aria-label="`通道 ${channel.id+1} 名称`"/><span class="wave-indicator" :style="{ backgroundColor: channel.color }"></span></div>
               </section>
             </div>
           </div>
-          <section class="panel log-panel"><div class="panel-title"><div><h2>采集事件</h2><p>设备、文件和缓冲状态记录</p></div><small>{{ sessionPath || '尚未创建记录' }}</small></div><div class="event-list"><div v-if="!history.length" class="event-placeholder">等待采集事件…</div><div v-for="(item,index) in history.slice(0,8)" :key="index" class="event-row" :class="item.level"><time>{{item.time}}</time><span>{{item.message}}</span></div></div></section>
+          <section class="panel log-panel"><div class="panel-title"><h2>事件</h2><span v-if="sessionPath" class="session-path" :title="sessionPath">{{ sessionPath }}</span></div><div class="event-list"><div v-if="!history.length" class="event-placeholder">暂无事件</div><div v-for="(item,index) in history.slice(0,8)" :key="index" class="event-row" :class="item.level"><time>{{ item.time }}</time><span>{{ item.message }}</span></div></div></section>
         </template>
         <template v-else>
-          <section class="intro"><div><p class="eyebrow">RECORDING UTILITIES</p><h1>大文件，按需切分。</h1><p>从原生 .zwraw 记录中截取时间段、选择通道，并输出可导入 zhuru_wave 的同步 CSV。</p></div><div class="splitter-symbol"><Scissor :size="44"/></div></section>
           <div class="splitter-grid">
-            <section class="panel split-config"><div class="panel-title"><div><h2>输入与输出</h2><p>支持整个采集目录或单个 .zwraw 文件</p></div></div>
-              <div class="control-group"><label>输入记录</label><div class="input-with-button"><el-input v-model="splitter.input" placeholder="选择原生记录目录或文件"/><el-button :icon="FolderOpened" @click="pickSplitterInput">浏览</el-button></div></div>
-              <div class="control-group"><label>输出目录</label><div class="input-with-button"><el-input v-model="splitter.output" placeholder="选择 CSV 输出目录"/><el-button :icon="FolderOpened" @click="pickSplitterOutput">浏览</el-button></div></div>
-              <div class="control-group"><label>导出通道</label><el-checkbox-group v-model="exportSelections" class="export-checks"><el-checkbox v-for="c of channels" :key="c.id" :value="c.id">CH{{c.id+1}} · {{c.name}}</el-checkbox></el-checkbox-group></div>
-              <div class="control-grid"><div class="control-group"><label>起始采样帧索引</label><el-input-number v-model="splitter.start" :min="0" :max="9007199254740991" controls-position="right"/></div><div class="control-group"><label>导出帧数（0=全部）</label><el-input-number v-model="splitter.count" :min="0" :max="9007199254740991" controls-position="right"/></div><div class="control-group"><label>每份 CSV 最大帧数</label><el-input-number v-model="splitter.pointsPerFile" :min="256" :max="200000" :step="1000" controls-position="right"/></div><div class="control-group"><label>CSV 电压单位</label><el-segmented v-model="splitter.unit" :options="['V','mV']" block/></div></div>
-              <div class="action-row"><el-button type="primary" size="large" :icon="Download" :loading="exporting" @click="exportData">切分并导出 CSV</el-button></div>
+            <section class="panel">
+              <div class="panel-title"><h2>文件</h2></div>
+              <div class="control-group"><label>输入记录</label><div class="input-with-button"><el-input v-model="splitter.input" placeholder=".zwraw 文件或记录目录"/><el-button :icon="FolderOpened" aria-label="浏览输入记录" @click="pickSplitterInput">浏览</el-button></div></div>
+              <div class="control-group"><label>输出目录</label><div class="input-with-button"><el-input v-model="splitter.output" placeholder="选择文件夹"/><el-button :icon="FolderOpened" aria-label="浏览输出目录" @click="pickSplitterOutput">浏览</el-button></div></div>
             </section>
-            <section class="panel split-guide"><div class="panel-title"><div><h2>兼容性说明</h2><p>面向 zhuru_wave 的离线检测与 XY 李萨如</p></div></div>
-              <div class="guide-step"><span>01</span><div><strong>保持同步</strong><p>从同一记录读取多路通道，不把不同时间的两个文件拼接成 XY。</p></div></div>
-              <div class="guide-step"><span>02</span><div><strong>自动切块</strong><p>CSV 采样索引从 0 重新编号，并保留原始起始索引元数据。单文件最多 200,000 点。</p></div></div>
-              <div class="guide-step"><span>03</span><div><strong>明确单位</strong><p>.zwraw 内部固定以 V 为单位保存 float32；导出时转换到 V 或 mV。旧 DLL 电压标定需实测确认。</p></div></div>
-              <div class="guide-step"><span>04</span><div><strong>导入现有软件</strong><p>CSV 首行采用 meta_key,meta_value,sample_index,X1,Y1…，可进入现有 XY 读取器。检测阈值如按 raw 定义需重新换算。</p></div></div>
+            <section class="panel">
+              <div class="panel-title"><h2>切分与导出</h2></div>
+              <div class="control-group"><label>通道</label><el-checkbox-group v-model="exportSelections" class="export-checks"><el-checkbox v-for="c of channels" :key="c.id" :value="c.id">CH{{ c.id + 1 }} · {{ c.name }}</el-checkbox></el-checkbox-group></div>
+              <div class="control-grid"><div class="control-group"><label>起始帧</label><el-input-number v-model="splitter.start" :min="0" :max="9007199254740991" controls-position="right"/></div><div class="control-group"><label>帧数 (0 = 全部)</label><el-input-number v-model="splitter.count" :min="0" :max="9007199254740991" controls-position="right"/><span class="sr-only">0 表示到记录结束</span></div><div class="control-group"><label>单文件帧数</label><el-input-number v-model="splitter.pointsPerFile" :min="256" :max="200000" :step="1000" controls-position="right"/></div><div class="control-group"><label>单位</label><el-segmented v-model="splitter.unit" :options="['V','mV']" block/></div></div>
+              <div class="action-row"><el-button type="primary" size="large" :icon="Download" :loading="exporting" @click="exportData">导出 CSV</el-button></div>
             </section>
           </div>
         </template>
@@ -302,6 +301,3 @@ async function warnLegacy() {
     </div>
   </div>
 </template>
-<script lang="ts">
-export default {}
-</script>

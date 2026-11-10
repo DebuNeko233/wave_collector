@@ -2,9 +2,11 @@
 
 Windows x64 多通道波形采集与分割工具。独立于 [zhuru_wave](https://github.com/DebuNeko233/zhuru_wave)，采用 **Electron + Vue 3 + Element Plus** 界面和 **MSVC C++20** 原生采集进程。
 
-> 当前为 **0.1.0 技术预览版**：模拟数据链路、原生分段记录、CSV 导出已通过本地 C++ 测试。**HT6004BX 旧 libwave.dll 采集路径是实验性的**，尚未经过设备连续性、时基、丢采样、通道使能和电压标定测试，不能作为已验证的工业连续采集方案。本仓库不包含未获授权的厂商 SDK/DLL。
+> 当前为 **0.1.0 技术预览版**：模拟数据链路、原生分段记录、CSV 导出已通过本地 C++ 测试。**HT6004BX 旧 libwave.dll 采集路径是实验性的**，尚未经过设备连续性、时基、丢采样、通道使能和电压标定测试，不能作为已验证的工业连续采集方案。厂商 DLL 是否允许公开再分发仍需核对许可。
 
 ## 功能
+
+界面遵循少说明、突出操作的布局原则：删除冗余副标题、宣传性介绍和四步使用指南，保留必要的设备安全提示。
 
 - CH1～CH4 自由选择，通道名称可修改，录制元信息中保存名称。
 - **设备给出采样率档位**：界面调用原生 `capabilities` 查询可选档位，通道组合或设备源变化时刷新；首选距离 1 MSa/s 最近的有效档位。采集后显示设备回读速率。
@@ -30,7 +32,7 @@ pnpm build:unpack  # 绿色版目录 dist/win-unpacked
 pnpm build:win     # Windows 安装包
 ```
 
-`pnpm build:native` 单独编译后端。Windows 下 CMake 默认使用机器上的 Visual Studio 生成器（如需指定可设置 `CMAKE_GENERATOR`）；对 MSVC 使用 x64。`vendor/hantek/dll/x64/` 中合法持有的 DLL 会由脚本复制到 `resources/bin/`，打包时再带入 `resources/bin`。DLL 不会提交到公开仓库。
+`pnpm build:native` 单独编译后端。Windows 下 CMake 默认使用机器上的 Visual Studio 生成器（如需指定可设置 `CMAKE_GENERATOR`）；对 MSVC 使用 x64。`vendor/hantek/dll/x64/` 的二进制由构建脚本复制到 `resources/bin/` 并随 Windows 软件打包。已安排从原 `zhuru_wave` 仓库同步 DLL，但原厂二进制的再分发许可仍须由仓库维护者确认，详见 `vendor/hantek/README.md`。
 
 ## 采样率档位
 
