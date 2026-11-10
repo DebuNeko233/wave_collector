@@ -231,6 +231,12 @@ watch([rates, selectedMask], () => {
   if (!live.value && rates.value.length && !rates.value.includes(form.rate)) form.rate = preferredSampleRate(rates.value)
 }, { immediate: true })
 watch([scopeMode, () => form.unit, selectedMask], scheduleDraw)
+watch(page, async () => {
+  await nextTick()
+  resizeObserver?.disconnect()
+  if (scopeViewport.value) resizeObserver?.observe(scopeViewport.value)
+  scheduleDraw()
+})
 
 onMounted(async () => {
   const saved = localStorage.getItem('wave-collector-ui')
@@ -449,16 +455,15 @@ async function changeSource() {
       </div>
 
       <main v-else class="splitter-page">
-        <div class="splitter-intro"><h2>导出 CSV</h2><p>从记录会话按通道和样本范围导出</p></div>
         <div v-if="errorText" class="inline-alert">{{ errorText }}</div>
         <div class="splitter-layout">
           <section class="split-panel">
-            <div class="split-head"><span class="step-number">01</span><h3>输入 / 输出</h3></div>
+            <div class="split-head"><h3>输入 / 输出</h3></div>
             <div class="field"><label>采集记录</label><div class="path-input"><el-input v-model="splitter.input" placeholder=".zwraw 文件或记录目录" :title="splitter.input" /><el-button :icon="FolderOpened" aria-label="选择输入" @click="pickInput" /></div></div>
             <div class="field"><label>导出位置</label><div class="path-input"><el-input v-model="splitter.output" placeholder="CSV 保存目录" :title="splitter.output" /><el-button :icon="FolderOpened" aria-label="选择输出目录" @click="pickFolder('export')" /></div></div>
           </section>
           <section class="split-panel">
-            <div class="split-head"><span class="step-number">02</span><h3>导出选项</h3></div>
+            <div class="split-head"><h3>导出选项</h3></div>
             <div class="field"><label>通道</label>
               <el-checkbox-group v-model="exportSelections" class="export-channel-list">
                 <el-checkbox v-for="ch in channels" :key="ch.id" :value="ch.id"><span class="checkbox-label"><i :style="{ background: ch.color }"></i>CH{{ ch.id + 1 }}</span></el-checkbox>

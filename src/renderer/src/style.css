@@ -83,11 +83,9 @@ button{cursor:pointer}
 .app-statusbar{height:35px;flex:0 0 35px;border-top:1px solid #29374a;background:#101927;display:flex;justify-content:space-between;align-items:center;padding:0 18px;color:#657c94;font-size:10px;letter-spacing:.01em}
 .status-connection{display:inline-flex;align-items:center;gap:8px}.status-connection.ok{color:#83bba8}.status-connection.ok i{background:#4dd7a2}
 .splitter-page{flex:1;min-height:0;overflow:auto;max-width:1120px;width:100%;margin:0 auto;padding:36px 34px;display:flex;flex-direction:column}
-.splitter-intro{margin-bottom:29px}.splitter-intro h2{font-size:25px;font-weight:700;letter-spacing:-.035em;margin:0;color:#f1f7ff}.splitter-intro p{font-size:13px;margin:8px 0 0;color:#8b9fb3}
 .splitter-layout{display:grid;grid-template-columns:1fr 1.05fr;gap:18px;align-items:stretch}
 .split-panel{background:#152233;border:1px solid #304054;border-radius:13px;padding:24px;min-width:0}
 .split-head{display:flex;align-items:center;gap:12px;margin:0 0 26px}.split-head h3{margin:0;font-size:15px;color:#eff5ff}
-.step-number{font:600 12px 'IBM Plex Mono',Consolas,monospace;color:#68d0ee;background:#1c3a4d;border:1px solid #2d5a6a;border-radius:7px;padding:7px}
 .split-panel>.field{margin-bottom:21px}.split-panel>.field:last-child{margin-bottom:0}
 .export-channel-list{display:flex;flex-wrap:wrap;gap:4px 15px}.checkbox-label{display:inline-flex;align-items:center;gap:8px;font:12px 'IBM Plex Mono',Consolas,monospace;color:#bacbdf}
 .split-panel .numeric-fields{margin-top:21px;gap:14px}
