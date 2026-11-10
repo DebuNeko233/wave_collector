@@ -12,6 +12,11 @@ const run = (args) => {
   return p.stdout
 }
 try {
+  const probe = JSON.parse(run(['--mode', 'probe']).trim())
+  assert.equal(probe.type, 'probe')
+  assert.equal(probe.mock, true)
+  assert.equal(Object.hasOwn(probe, 'legacy_available'), false, 'legacy wrapper must not be used')
+  if (process.platform === 'win32') assert.equal(probe.hantek_sdk_linked, true)
   const logs = run(['--mode','record','--source','mock','--rate','20000','--mask','3','--max-seconds','1','--segment-seconds','1','--segment-mb','1','--output',temp,'--unit','mV','--names','X|Y|x2|y2'])
   const start = logs.split('\n').map(s => { try { return JSON.parse(s) } catch { return null } }).find(x => x?.type === 'started')
   const stop = logs.split('\n').map(s => { try { return JSON.parse(s) } catch { return null } }).find(x => x?.type === 'stopped')
