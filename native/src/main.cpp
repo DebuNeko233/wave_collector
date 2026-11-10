@@ -232,14 +232,18 @@ public:
         auto lookup = reinterpret_cast<Lookup>(get("LookupSampleRateHz"));
         if (search() <= 0) throw std::runtime_error("HT6004BX not found");
         // Conservative: no hardware sampling mode is inferred from the requested number alone.
-        // Original wrapper exposes timebase indices; choose highest table rate <= request.
-        int mode = 4; // conservative: physical channel enable is unverified in old wrapper
-        int bestIdx = -1; double best = 0;
+        // Select only a genuine timebase-table entry; never silently round an unsupported rate.
+        // Physical channel enable is unverified in the old wrapper, so use the 4-channel table.
+        int mode = 4;
+        int bestIdx = -1;
         for (int i = 0; i < 36; ++i) {
-            double candidate = lookup(i, mode);
-            if (candidate <= requested * 1.000001 && candidate > best) { best = candidate; bestIdx = i; }
+            const double candidate = lookup(i, mode);
+            if (std::isfinite(candidate) && std::abs(candidate-requested) <= std::max(1e-8, requested*1e-8)) {
+                bestIdx = i;
+                break;
+            }
         }
-        if (bestIdx < 0) throw std::runtime_error("Requested rate lower than supported legacy timebase table");
+        if (bestIdx < 0) throw std::runtime_error("Unsupported sampling rate for this channel mode; query capabilities first");
         unsigned short volts[4]{7,7,7,7}, coupling[4]{0,0,0,0}, bandwidth[4]{0,0,0,0};
         if (!init(volts, coupling, bandwidth, (unsigned short)bestIdx, 0, 0, 20000, 0)) throw std::runtime_error("InitDevice failed");
         rate_ = rate();
