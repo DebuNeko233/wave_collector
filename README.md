@@ -32,7 +32,7 @@ pnpm build:unpack  # 绿色版目录 dist/win-unpacked
 pnpm build:win     # Windows 安装包
 ```
 
-`pnpm build:native` 单独编译后端。Windows 下 CMake 默认使用机器上的 Visual Studio 生成器（如需指定可设置 `CMAKE_GENERATOR`）；对 MSVC 使用 x64。`vendor/hantek/dll/x64/` 的二进制由构建脚本复制到 `resources/bin/` 并随 Windows 软件打包。已安排从原 `zhuru_wave` 仓库同步 DLL，但原厂二进制的再分发许可仍须由仓库维护者确认，详见 `vendor/hantek/README.md`。
+`pnpm build:native` 单独编译后端。Windows 下 CMake 默认使用机器上的 Visual Studio 生成器（如需指定可设置 `CMAKE_GENERATOR`）；对 MSVC 使用 x64。`vendor/hantek/dll/x64/` 的二进制由构建脚本复制到 `resources/bin/` 并随 Windows 软件打包。已从原 `zhuru_wave` 仓库同步全部五个 DLL，但原厂二进制的再分发许可仍须由仓库维护者确认，详见 `vendor/hantek/README.md`。
 
 ## 采样率档位
 
