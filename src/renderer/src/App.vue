@@ -221,6 +221,8 @@ async function warnLegacy() {
   if (form.source !== 'legacy') return
   await ElMessageBox.alert('当前旧 libwave.dll 提供的是重复读取接口。它尚未通过连续采样、不重不漏、采样时钟校准的现场验证，不能视为生产级无缝连续采集。请先用模拟设备验证导出流程，再联调原厂 SDK。','实验性旧 DLL 采集', { type: 'warning' })
 }
+</script>
+
 <template>
   <div class="app-shell">
     <aside class="side-bar">
