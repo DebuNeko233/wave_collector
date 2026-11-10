@@ -110,7 +110,7 @@ static uint64_t nowMillis() {
     return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 // Canonical payload: interleaved little-endian float32 VOLTS in ascending enabled-channel order.
-// Float volt conversion in the legacy adapter is provided by libwave.dll, NOT verified ADC calibration.
+// The vendor SDK supplies sample codes; voltage scaling is nominal until calibrated with the real probes.
 #pragma pack(push, 1)
 struct Header {
     char magic[8]{'Z','W','R','A','W','0','1','\0'};
@@ -170,99 +170,9 @@ public:
 };
 
 #ifdef _WIN32
-class LegacyDevice : public Device {
-    HMODULE soft_ = nullptr, hard_ = nullptr, wave_ = nullptr;
-    std::vector<int> channels_;
-    double rate_ = 0;
-    // The old libwave DLL ABI differs from the archived C++ source. Resolve the deployed DLL API.
-    using Search = int(*)();
-    using Init = bool(*)(unsigned short*, unsigned short*, unsigned short*, unsigned short, unsigned short, unsigned short, unsigned long, unsigned short);
-    using Read = int(*)(int, float*, float*, float*, float*);
-    using Rate = double(*)();
-    using Lookup = double(*)(int, int);
-    Read read_ = nullptr;
-    std::array<std::vector<float>, 4> channelBuf_;
-    void loadLibraries() {
-        if (wave_) return;
-        wchar_t exeBuf[32768]{};
-        if (!GetModuleFileNameW(nullptr, exeBuf, 32768)) throw std::runtime_error("Cannot locate acquisition executable");
-        fs::path folder = fs::path(exeBuf).parent_path();
-        auto load = [&](const wchar_t* name) -> HMODULE {
-            HMODULE h = LoadLibraryExW((folder / name).c_str(), nullptr,
-                LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
-            if (!h) throw std::runtime_error("Cannot load SDK DLL beside zw_acq.exe; check vendor files, x64 and MSVC runtime");
-            return h;
-        };
-        soft_ = load(L"HTSoftDll.dll");
-        hard_ = load(L"HTHardDll.dll");
-        wave_ = load(L"libwave.dll");
-    }
-    FARPROC get(const char* name) {
-        auto f = GetProcAddress(wave_, name);
-        if (!f) throw std::runtime_error(std::string("Missing libwave export: ") + name);
-        return f;
-    }
-public:
-    std::vector<double> rateChoices(int mask) {
-        channelsFromMask(mask);
-        loadLibraries();
-        if (reinterpret_cast<Search>(get("SearchDevice"))() <= 0)
-            throw std::runtime_error("HT6004BX not found; install driver and connect the device");
-        auto lookup = reinterpret_cast<Lookup>(get("LookupSampleRateHz"));
-        // The archived wrapper does not prove it physically disables unselected inputs.
-        // Use the conservative 4-channel mode table for every channel selection.
-        std::vector<double> rates;
-        for (int i = 0; i < 36; ++i) {
-            double r = lookup(i, 4);
-            if (std::isfinite(r) && r >= 100 && r <= 1000000000) rates.push_back(r);
-        }
-        std::sort(rates.begin(), rates.end(), std::greater<double>());
-        rates.erase(std::unique(rates.begin(), rates.end()), rates.end());
-        if (rates.empty()) throw std::runtime_error("Legacy DLL returned no valid sampling rates");
-        return rates;
-    }
-    ~LegacyDevice() override { if (wave_) FreeLibrary(wave_); if (hard_) FreeLibrary(hard_); if (soft_) FreeLibrary(soft_); }
-    double connect(double requested, int mask) override {
-        channels_ = channelsFromMask(mask);
-        loadLibraries();
-        auto search = reinterpret_cast<Search>(get("SearchDevice"));
-        auto init = reinterpret_cast<Init>(get("InitDevice"));
-        read_ = reinterpret_cast<Read>(get("GetAllChannelData"));
-        auto rate = reinterpret_cast<Rate>(get("GetSampleRate"));
-        auto lookup = reinterpret_cast<Lookup>(get("LookupSampleRateHz"));
-        if (search() <= 0) throw std::runtime_error("HT6004BX not found");
-        // Conservative: no hardware sampling mode is inferred from the requested number alone.
-        // Select only a genuine timebase-table entry; never silently round an unsupported rate.
-        // Physical channel enable is unverified in the old wrapper, so use the 4-channel table.
-        int mode = 4;
-        int bestIdx = -1;
-        for (int i = 0; i < 36; ++i) {
-            const double candidate = lookup(i, mode);
-            if (std::isfinite(candidate) && std::abs(candidate-requested) <= std::max(1e-8, requested*1e-8)) {
-                bestIdx = i;
-                break;
-            }
-        }
-        if (bestIdx < 0) throw std::runtime_error("Unsupported sampling rate for this channel mode; query capabilities first");
-        unsigned short volts[4]{7,7,7,7}, coupling[4]{0,0,0,0}, bandwidth[4]{0,0,0,0};
-        if (!init(volts, coupling, bandwidth, (unsigned short)bestIdx, 0, 0, 20000, 0)) throw std::runtime_error("InitDevice failed");
-        rate_ = rate();
-        if (!(rate_ > 0 && std::isfinite(rate_))) throw std::runtime_error("SDK did not return valid sample rate");
-        return rate_;
-    }
-    size_t acquire(size_t maxFrames, std::vector<float>& dst) override {
-        size_t requested = std::min<size_t>(maxFrames, 10000);
-        for (auto& b : channelBuf_) b.resize(requested);
-        int n = read_((int)requested, channelBuf_[0].data(), channelBuf_[1].data(), channelBuf_[2].data(), channelBuf_[3].data());
-        if (n <= 0 || n > (int)requested) throw std::runtime_error("Legacy GetAllChannelData returned invalid length");
-        dst.resize((size_t)n * channels_.size());
-        for (int i = 0; i < n; ++i) for (size_t j = 0; j < channels_.size(); ++j) dst[(size_t)i * channels_.size() + j] = channelBuf_[channels_[j]][i];
-        return (size_t)n;
-    }
-    std::string source() const override { return "legacy_libwave_unverified"; }
-    std::string continuity() const override { return "UNVERIFIED_legacy_poll_may_have_gaps_or_repeats"; }
-};
+#include "hantek_device.h"
 #endif
+
 struct Segment {
     std::string name;
     uint64_t startIndex = 0;
@@ -352,11 +262,11 @@ static int record(const Args& args) {
     std::unique_ptr<Device> device;
     if (source == "mock") device = std::make_unique<MockDevice>();
 #ifdef _WIN32
-    else if (source == "legacy") device = std::make_unique<LegacyDevice>();
+    else if (source == "hantek") device = std::make_unique<HantekDevice>();
 #endif
     else throw std::runtime_error("Unknown source or unsupported OS: " + source);
     const double rate = device->connect(requested, mask);
-    // No 'continuous verified' statement is made for the legacy polling SDK.
+    // Repeated NORMAL trigger windows are not known to be gapless.
     if (!std::isfinite(rate) || rate <= 0) throw std::runtime_error("Invalid acquired sample rate");
     fs::create_directories(root);
     fs::path folder = root / ("record_" + nowStamp());
@@ -366,7 +276,7 @@ static int record(const Args& args) {
     uint64_t framesPerFile = (uint64_t)std::max(1.0, std::floor(rate * segSec));
     uint64_t bytesFrames = (uint64_t)segMb * 1024ULL * 1024ULL / (ch.size() * sizeof(float));
     framesPerFile = std::max<uint64_t>(1, std::min(framesPerFile, bytesFrames));
-    const size_t blockFrames = (source == "legacy") ? 10000 : 8192;
+    const size_t blockFrames = (source == "hantek") ? 4096 : 8192;
     // 512 blocks ~ 16 MiB for 4 channels at 2k; actual capacity is 64MiB for 8k*4*4*128.
     BlockQueue queue(128);
     std::vector<Segment> segments;
@@ -424,7 +334,7 @@ static int record(const Args& args) {
         while (!shouldStop) {
             Block b; b.start = frames;
             b.frames = device->acquire(blockFrames, b.data);
-            if (b.frames == 0) throw std::runtime_error("Device returned no samples");
+            if (b.frames == 0) { if (shouldStop.load()) break; throw std::runtime_error("Device returned no samples"); }
             // Validate data before queue; a broken buffer must not be recorded as valid.
             if (b.data.size() != b.frames * ch.size()) throw std::runtime_error("Device buffer length mismatch");
             frames += b.frames;
@@ -570,10 +480,10 @@ static int programMain(int argc, char** argv) {
                 note = "模拟采集：采样连续性仅供软件测试";
             }
 #ifdef _WIN32
-            else if (source == "legacy") {
-                LegacyDevice dev;
+            else if (source == "hantek") {
+                HantekDevice dev;
                 rates = dev.rateChoices(mask);
-                note = "旧 libwave 四通道时基表；实际连续传输能力和物理通道开关未验证";
+                note = "HT6004BX 厂商 SDK 档位；NORMAL 模式跨采集窗口连续性未验证";
             }
 #endif
             else throw std::runtime_error("Unknown device source or unsupported operating system");
@@ -590,7 +500,12 @@ static int programMain(int argc, char** argv) {
             return 0;
         }
         if (mode == "probe") {
-            send("{\"type\":\"probe\",\"mock\":true,\"legacy_available\":" + std::string(fs::exists(fs::path(argv[0]).parent_path() / "libwave.dll") ? "true" : "false") + "}");
+            #ifdef _WIN32
+            constexpr bool sdkLinked = true;
+#else
+            constexpr bool sdkLinked = false;
+#endif
+            send("{\"type\":\"probe\",\"mock\":true,\"hantek_sdk_linked\":" + std::string(sdkLinked ? "true" : "false") + "}");
             return 0;
         }
         throw std::runtime_error("Unknown mode");

@@ -1,13 +1,15 @@
-# Hantek x64 DLL
+# HT6004BX 原厂 SDK（x64）
 
-`vendor/hantek/dll/x64/` 保存从本账号现有 [zhuru_wave](https://github.com/DebuNeko233/zhuru_wave) 归档工程同步的五个 DLL：
+本目录使用原厂 `HTHardDll` / `HTSoftDll` SDK 接口，**不使用自研 `libwave.dll`**。
 
-- `HTSoftDll.dll`、`HTHardDll.dll`：原厂硬件接口依赖；
-- `HTDisplayDll.dll`、`MeasDll.dll`：原厂显示 / 测量组件；
-- `libwave.dll`：原 `zhuru_wave` 的 C++ 封装，并非原厂 DLL。
+| 目录 | 内容 |
+|---|---|
+| `include/` | 厂商 `DefMacro.h`、`HTHardDll.h`（为当前目录修改了相对 include 路径） |
+| `lib/x64/` | `HTHardDll.lib`、`HTSoftDll.lib`，供 MSVC 直接链接 |
+| `dll/x64/` | `HTHardDll.dll`、`HTSoftDll.dll` 与其他原厂运行库 |
 
-`pnpm build:native` 会将 DLL 复制到 `resources/bin/`，使开发版与 Windows 打包版包含运行所需依赖。驱动仍需要单独安装。
+源版本：HT6004BX SDK，镜像仓库 [`CircuitAnalysis/Hantek`](https://github.com/CircuitAnalysis/Hantek/tree/fbf09d36e125a3b57da96cd07c99aafc232ad90c/6XXX%20USB%20Scope/HT6004BX_SDK)，固定源码提交 `fbf09d36e125a3b57da96cd07c99aafc232ad90c`。原厂 SDK 下载地址为 `https://www.hantek.com/Product/Hantek6000BX/HT6004BX_SDK.zip`，请优先用设备随附或原厂确认的版本核对镜像内容。`.lib` 为 Windows DLL 导入库，不是算法静态实现。`pnpm build:native` 构建时链接 `.lib`，Windows 打包带入匹配的 `.dll`。
 
-**授权说明：** 这些二进制不因存放于本仓库而自动获得开源许可。原厂 DLL 的版权归其权利人所有，使用/再次分发仍需遵守厂商许可。本仓库尚未附有可以核实的原厂再分发条款；如无相应授权，应撤下公开 DLL 并改为用户本地安装。
+新添加的 `.github/workflows/sync-sdk.yml` 负责从固定版本镜像同步 SDK（包括匹配的 x64 `.lib` / `.dll`），并删除旧自研 `libwave.dll`。该操作不依赖旧 `zhuru_wave` 代码。
 
-**采集限制：** 当前 `legacy` 模式通过旧 `libwave.dll` 轮询获取采集块，不能证明块间时间轴无缝、无重复或无丢采样。要用于生产连续记录，需要用原厂 SDK 与实际设备完成验证。
+**许可**：SDK 二进制和头文件的再分发许可尚未经核实；该仓库已有文件并不构成获得再分发授权。投入生产或向外发布安装包前，应与厂家确认授权。硬件仍需要正确驱动，CI 模拟测试不代表实机连续采集已通过。

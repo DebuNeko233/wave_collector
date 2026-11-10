@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, copyFileSync, existsSync, readdirSync } from 'node:fs'
+import { mkdirSync, copyFileSync, existsSync, readdirSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
@@ -27,14 +27,19 @@ const source = locations.find(existsSync)
 if (!source) throw new Error(`Compiled ${binaryName} was not found`)
 const dest = join(root, 'resources', 'bin')
 mkdirSync(dest, { recursive: true })
+rmSync(join(dest, 'libwave.dll'), { force: true })
 copyFileSync(source, join(dest, binaryName))
 // Copy x64 DLL dependencies (vendor redistribution rights must be verified by the maintainer).
 if (process.platform === 'win32') {
   const vendor = join(root, 'vendor', 'hantek', 'dll', 'x64')
+  if (!existsSync(vendor)) throw new Error('Missing vendor SDK DLL directory')
   if (existsSync(vendor)) {
     for (const name of readdirSync(vendor)) {
-      if (name.toLowerCase().endsWith('.dll')) copyFileSync(join(vendor, name), join(dest, name))
+      if (['htharddll.dll', 'htsoftdll.dll'].includes(name.toLowerCase())) copyFileSync(join(vendor, name), join(dest, name))
     }
+  }
+  for (const required of ['HTSoftDll.dll', 'HTHardDll.dll']) {
+    if (!existsSync(join(dest, required))) throw new Error('Missing required vendor DLL: ' + required)
   }
 }
 console.log(`Native executable -> ${join(dest, binaryName)}`)

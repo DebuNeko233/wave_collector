@@ -11,7 +11,7 @@ let quitting = false
 let recording = false
 
 type RecordingConfig = {
-  source: 'mock' | 'legacy'
+  source: 'mock' | 'hantek'
   output: string
   mask: number
   rate: number
@@ -115,8 +115,8 @@ app.whenReady().then(() => {
     return r.canceled ? null : r.filePaths[0]
   })
   ipcMain.handle('acq:status', () => ({ recording, available: existsSync(nativePath()), platform: process.platform, defaultOutput: path.join(app.getPath('documents'), 'ZhuruWaveRecordings') }))
-  ipcMain.handle('acq:capabilities', async (_, source: 'mock' | 'legacy', mask: number) => {
-    if (!['mock','legacy'].includes(source)) throw new Error('未知设备源')
+  ipcMain.handle('acq:capabilities', async (_, source: 'mock' | 'hantek', mask: number) => {
+    if (!['mock','hantek'].includes(source)) throw new Error('未知设备源')
     const args = ['--mode', 'capabilities', '--source', source, '--mask', String(numeric(mask, 1, 15, '通道掩码'))]
     const logs: any[] = []
     const code = await runNative(args, x => logs.push(x))
@@ -130,7 +130,7 @@ app.whenReady().then(() => {
     if (recorder || recording) throw new Error('已有采集进程运行中')
     const exe = nativePath()
     if (!existsSync(exe)) throw new Error('原生程序未编译，请运行 pnpm build:native')
-    if (!['mock', 'legacy'].includes(cfg.source)) throw new Error('无效的数据源')
+    if (!['mock', 'hantek'].includes(cfg.source)) throw new Error('无效的数据源')
     if (!['V', 'mV'].includes(cfg.unit)) throw new Error('无效的电压单位')
     const names = cfg.names
     if (!Array.isArray(names) || names.length !== 4 || names.some(s => typeof s !== 'string' || !s.trim() || s.length > 60 || s.includes('|')))

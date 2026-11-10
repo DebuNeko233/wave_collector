@@ -22,14 +22,16 @@ jobs:
         run: pnpm test
       - name: Full app build and unpacked package
         run: pnpm build:unpack
-      - name: Verify x64 DLLs are packaged
+      - name: Verify native SDK dependencies
         shell: pwsh
         run: |
           $bin = 'dist/win-unpacked/resources/bin'
-          foreach ($name in @('HTSoftDll.dll', 'HTHardDll.dll', 'HTDisplayDll.dll', 'MeasDll.dll', 'libwave.dll')) {
-            if (-not (Test-Path (Join-Path $bin $name))) {
-              throw "Missing bundled dependency: $name"
-            }
+          foreach ($name in @('HTSoftDll.dll', 'HTHardDll.dll')) {
+            if (-not (Test-Path (Join-Path $bin $name))) { throw "Missing vendor SDK DLL: $name" }
+          }
+          if (Test-Path (Join-Path $bin 'libwave.dll')) { throw 'Unexpected legacy libwave.dll in release' }
+          foreach ($name in @('HTHardDll.lib', 'HTSoftDll.lib')) {
+            if (-not (Test-Path (Join-Path 'vendor/hantek/lib/x64' $name))) { throw "Missing SDK import library: $name" }
           }
       - name: Upload portable app
         if: success()

@@ -1,0 +1,55 @@
+name: Sync matching HT6004BX x64 SDK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/sync-sdk.yml
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: target
+          persist-credentials: true
+      - uses: actions/checkout@v4
+        with:
+          repository: CircuitAnalysis/Hantek
+          ref: fbf09d36e125a3b57da96cd07c99aafc232ad90c
+          path: sdk-mirror
+          persist-credentials: false
+      - name: Install x64 SDK headers, import libraries and matching DLLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="sdk-mirror/6XXX USB Scope/HT6004BX_SDK"
+          mkdir -p target/vendor/hantek/{include,lib/x64,dll/x64}
+          cp "$src/HeadFiles_UTF8/DefMacro.h" target/vendor/hantek/include/DefMacro.h
+          cp "$src/HeadFiles_UTF8/HTHardDll.h" target/vendor/hantek/include/HTHardDll.h
+          sed -i 's#../../HeadFiles_UTF8/DefMacro.h#DefMacro.h#g' target/vendor/hantek/include/HTHardDll.h
+          for name in HTHardDll HTSoftDll; do
+            cp "$src/Lib/x64/$name.lib" "target/vendor/hantek/lib/x64/$name.lib"
+            cp "$src/Dll/x64/$name.dll" "target/vendor/hantek/dll/x64/$name.dll"
+          done
+          git -C target rm -f --ignore-unmatch vendor/hantek/dll/x64/libwave.dll
+          sha256sum target/vendor/hantek/lib/x64/*.lib target/vendor/hantek/dll/x64/HT*.dll
+      - name: Commit SDK to main
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A vendor/hantek/include vendor/hantek/lib/x64 vendor/hantek/dll/x64
+          if git diff --cached --quiet; then
+            echo 'SDK already synchronized'
+            exit 0
+          fi
+          git commit -m 'chore(vendor): install HT6004BX x64 SDK import libraries and headers'
+          git push origin HEAD:main

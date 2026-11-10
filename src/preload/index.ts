@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-export type Source = 'mock' | 'legacy'
+export type Source = 'mock' | 'hantek'
 export type Unit = 'V' | 'mV'
 export interface RecordingConfig {
   source: Source

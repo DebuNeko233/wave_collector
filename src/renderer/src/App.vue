@@ -132,7 +132,7 @@ function handleEvent(event: AcqEvent) {
       actualRate.value = event.rate || 0
       continuity.value = event.continuity || ''
       log(`采集已开始：${sessionPath.value}`)
-      if (continuity.value.includes('UNVERIFIED')) log('旧版 DLL 不保证采样窗口连续，请勿视为无丢点原始记录', 'warn')
+      if (continuity.value.includes('UNVERIFIED')) log('厂商 SDK 触发窗口之间的连续性未经验证', 'warn')
       break
     case 'stats':
       captured.value = event.captured || 0
@@ -217,9 +217,9 @@ async function exportData() {
   } catch(e) { log(String(e),'error');ElMessage.error(String(e)) }
   finally { exporting.value=false }
 }
-async function warnLegacy() {
-  if (form.source !== 'legacy') return
-  await ElMessageBox.alert('当前旧 libwave.dll 提供的是重复读取接口。它尚未通过连续采样、不重不漏、采样时钟校准的现场验证，不能视为生产级无缝连续采集。请先用模拟设备验证导出流程，再联调原厂 SDK。','实验性旧 DLL 采集', { type: 'warning' })
+async function warnHantek() {
+  if (form.source !== 'hantek') return
+  await ElMessageBox.alert('HT6004BX 的 NORMAL 模式每次读取的是一个硬件触发窗口，跨窗口是否无间断、无重复和无丢点尚未验证。请通过实机标定。','厂商 SDK 采集提示', { type: 'warning' })
 }
 </script>
 
@@ -265,14 +265,14 @@ async function warnLegacy() {
             <div class="controls-column">
               <section class="panel configuration">
                 <div class="panel-title"><h2>采集设置</h2></div>
-                <div class="control-group"><label>设备</label><el-select v-model="form.source" :disabled="live" @change="warnLegacy"><el-option label="模拟设备" value="mock"/><el-option label="HT6004BX（实验性）" value="legacy"/></el-select></div>
+                <div class="control-group"><label>设备</label><el-select v-model="form.source" :disabled="live" @change="warnHantek"><el-option label="模拟设备" value="mock"/><el-option label="HT6004BX（厂商 SDK）" value="hantek"/></el-select></div>
                 <div class="control-grid">
                   <div class="control-group"><label>采样率</label><el-select v-model="form.rate" :disabled="live || rateLoading || !rateOptions.length" :loading="rateLoading" placeholder="查询设备档位"><el-option v-for="option in rateOptions" :key="option.value" :label="option.label" :value="option.value"/></el-select></div>
                   <div class="control-group"><label>单位</label><el-segmented v-model="form.unit" :options="['V', 'mV']" :disabled="live" block/></div>
                 </div>
                 <div class="control-group"><label>保存位置</label><div class="input-with-button"><el-input v-model="form.output" :disabled="live" placeholder="选择文件夹"/><el-button :disabled="live" :icon="FolderOpened" aria-label="选择保存目录" @click="pickOutput"/></div></div>
                 <div class="control-grid"><div class="control-group"><label>分段时长 (s)</label><el-input-number v-model="form.segmentSeconds" :disabled="live" :min="1" :max="3600" controls-position="right"/></div><div class="control-group"><label>分段大小 (MB)</label><el-input-number v-model="form.segmentMb" :disabled="live" :min="1" :max="4096" controls-position="right"/></div></div>
-                <p v-if="form.source === 'legacy'" class="device-warning"><InfoFilled /> 旧 DLL 尚未验证无丢点连续采集</p>
+                <p v-if="form.source === 'hantek'" class="device-warning"><InfoFilled /> NORMAL 模式尚未验证无间断采集</p>
                 <p v-else-if="rateNote && !rateOptions.length && !rateLoading" class="device-warning"><InfoFilled /> {{ rateNote }}</p>
                 <div class="action-row"><el-button v-if="!live" type="primary" size="large" :icon="VideoPlay" :disabled="!nativeAvailable || rateLoading || !rateOptions.length" @click="start">开始采集</el-button><el-button v-else type="danger" size="large" :icon="VideoPause" :loading="stopping" @click="stop">停止并保存</el-button></div>
               </section>
