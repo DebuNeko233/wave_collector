@@ -7,6 +7,13 @@ button{cursor:pointer}
 .rail{width:var(--ui-rail);flex:0 0 var(--ui-rail);background:#101927;border-right:1px solid #233245;display:flex;flex-direction:column;align-items:center}
 .brand-symbol{height:var(--ui-topbar);width:100%;display:flex;justify-content:center;align-items:center;color:#6bd7f7;border-bottom:1px solid #233245}
 .brand-symbol svg{filter:drop-shadow(0 0 8px rgba(79,207,252,.20))}
+/* Element Plus icon SVGs use 1em: size belongs on el-icon, not the SVG component. */
+.application .el-icon{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1;vertical-align:middle}
+.application .el-icon>svg{display:block;width:1em;height:1em;flex:0 0 1em;max-width:100%;max-height:100%}
+.brand-symbol .brand-icon{width:24px;height:24px;font-size:24px;flex:0 0 24px}
+.rail-link .rail-icon{width:20px;height:20px;font-size:20px;flex:0 0 20px}
+.sdk-caveat .sdk-icon{width:14px;height:14px;font-size:14px;flex:0 0 14px}
+
 .rail-navigation{display:flex;flex-direction:column;align-items:center;gap:10px;padding-top:18px;width:100%}
 .rail-link{width:42px;height:42px;border-radius:10px;border:1px solid transparent;background:transparent;display:grid;place-items:center;color:#7890a7;transition:background .12s ease,color .12s ease,border-color .12s ease}
 .rail-link:hover{background:#203147;color:#e0e9f4}
@@ -28,7 +35,7 @@ button{cursor:pointer}
 .capture-main{display:flex;flex-direction:column;min-height:0;min-width:0;gap:var(--ui-gap);padding:16px 18px 12px;overflow:auto;background:#0e1622}
 .inline-alert{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#3c231e;color:#ffb6a0;border:1px solid #694239;border-radius:8px;padding:10px 14px;font-size:12px;line-height:1.5}
 .inline-alert.subtle{background:#203047;color:#a9c7e5;border-color:#355371}
-.inline-alert button{color:inherit;border:0;background:transparent;font-size:21px;line-height:1}
+.inline-alert button{width:24px;height:24px;flex:0 0 24px;display:grid;place-items:center;padding:0;color:inherit;border:0;border-radius:5px;background:transparent;font-size:17px;font-weight:400;line-height:1}
 .scope-surface{display:flex;flex-direction:column;flex:1 1 auto;min-height:320px;border:1px solid #2b3b50;background:#0a101a;border-radius:11px;overflow:hidden;box-shadow:0 15px 44px rgba(0,0,0,.13)}
 .scope-toolbar{height:48px;flex:0 0 48px;display:flex;align-items:center;justify-content:space-between;gap:12px;background:#152033;border-bottom:1px solid #27384d;padding:0 14px}
 .scope-label{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:700;color:#dde8f4;white-space:nowrap}
@@ -104,6 +111,12 @@ button{cursor:pointer}
 .application .el-segmented{background:#0c1927;border:1px solid #33465b;--el-segmented-item-selected-bg-color:#294c63;--el-segmented-item-selected-color:#dcf5ff;--el-segmented-item-hover-bg-color:#1f3448;--el-segmented-item-hover-color:#f0f7ff;--el-segmented-bg-color:#0e1928;min-height:var(--ui-control);height:var(--ui-control)}
 .application .el-checkbox__label{font-size:12px}
 .application .el-switch{--el-switch-off-color:#384b60;--el-switch-on-color:#46c3e0}
+/* Button icons are generated internally by Element Plus; keep them uniform. */
+.application .el-button>.el-icon{width:16px;height:16px;font-size:16px;flex:0 0 16px}
+.application .el-button>.el-icon>svg{width:16px;height:16px;max-width:16px;max-height:16px}
+.application .path-input>.el-button>.el-icon{width:16px;height:16px;font-size:16px;flex:0 0 16px}
+.application .el-select__caret{width:14px;height:14px;font-size:14px}
+.application .el-input-number__increase .el-icon,.application .el-input-number__decrease .el-icon{width:12px;height:12px;font-size:12px}
 .application .el-button:not(.el-button--primary):not(.el-button--danger){background:#213247;border-color:#384c64;color:#c5d9ec}
 .application .el-button:not(.el-button--primary):not(.el-button--danger):hover{background:#2b425c;border-color:#5a89a3}
 .application .el-button--primary{color:#081a28;background:#62c6e6;border-color:#62c6e6}

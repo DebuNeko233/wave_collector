@@ -334,13 +334,13 @@ async function changeSource() {
 <template>
   <div class="application">
     <aside class="rail">
-      <div class="brand-symbol" aria-label="Wave Collector"><DataLine :size="24" /></div>
+      <div class="brand-symbol" aria-label="Wave Collector"><el-icon :size="24" class="brand-icon"><DataLine /></el-icon></div>
       <div class="rail-navigation">
         <button class="rail-link" :class="{ selected: page === 'capture' }" title="采集" aria-label="采集" @click="page = 'capture'">
-          <Monitor :size="21" />
+          <el-icon :size="20" class="rail-icon"><Monitor /></el-icon>
         </button>
         <button class="rail-link" :class="{ selected: page === 'splitter' }" title="分割器" aria-label="分割器" @click="page = 'splitter'">
-          <Scissor :size="21" />
+          <el-icon :size="20" class="rail-icon"><Scissor /></el-icon>
         </button>
       </div>
       <div class="rail-bottom">WC</div>
@@ -421,7 +421,7 @@ async function changeSource() {
               <div class="field"><label>电压单位</label>
                 <el-segmented v-model="form.unit" :options="['V', 'mV']" :disabled="live" block />
               </div>
-              <div v-if="form.source === 'hantek'" class="sdk-caveat"><InfoFilled :size="15" />触发窗口采集，连续性未验证</div>
+              <div v-if="form.source === 'hantek'" class="sdk-caveat"><el-icon :size="14" class="sdk-icon"><InfoFilled /></el-icon>触发窗口采集，连续性未验证</div>
             </section>
 
             <section class="settings-group">
